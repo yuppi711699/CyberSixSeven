@@ -1,2 +1,48 @@
+# Plan documents — deliberately not committed (see README)
 documents/
+
+# Secrets
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+firmware/esp32/secrets.h
+
+# JVM / Maven
+target/
+*.class
+
+# Node
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# PlatformIO
+.pio/
+
+# Terraform — tfstate contains secrets in plaintext
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+
+# Generated models
+*.stl
+
+# OS / editor
+.DS_Store
+*.log

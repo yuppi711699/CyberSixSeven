@@ -1,2 +1,33 @@
-# Add directories or file patterns to ignore during indexing (e.g. foo/ or *.csv)
+# Secrets — blocks Agent, Tab and @-mention access.
+# NOTE: this does NOT block the terminal or MCP tools. It reduces exposure, it does not guarantee it.
 .env
+.env.*
+*.pem
+*.key
+*.crt
+firmware/esp32/secrets.h
+
+# Generated protobuf stubs — thousands of lines of builder boilerplate.
+# Without this, Cursor retrieves generated code instead of yours.
+**/generated-sources/
+
+# Build output
+**/target/
+node_modules/
+.next/
+.turbo/
+out/
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.pio/
+
+# Terraform state — contains resolved secret values
+.terraform/
+*.tfstate
+*.tfstate.*
+
+# Large, low-signal
+pnpm-lock.yaml
+*.stl
