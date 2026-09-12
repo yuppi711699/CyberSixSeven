@@ -1,0 +1,53 @@
+---
+description: Kotlin idiom, pom wiring, Strategy-pattern shape and MockK testing for services/reward-service — the repo's one Kotlin module, written by a developer who cannot review Kotlin critically
+globs: services/reward-service/**
+alwaysApply: false
+---
+
+## Scope — this module stays tiny
+
+- The whole service is **one endpoint**: `POST /reward/select`, request `{score, totalQuestions}`, response `{intensity, voiceLineId}`. One controller, one selector, three strategies, two DTOs. That is the finished shape, not a starting point.
+- No database, no JPA entity, no repository, no Flyway migration, no Redis, no SQS/SNS consumer, no gRPC server, no Spring Security, no `@Scheduled` job, no second endpoint. If a task appears to need one, stop and say so — scoring, persistence and auth all live in `platform-api`.
+- `reward-service` makes **no outbound calls at all**: no AWS SDK, no `RestClient`, no call back into `platform-api`. Selection is pure CPU over the request body. `device-command-service` calls this endpoint synchronously from inside its SQS poll loop with a short timeout and a default-intensity fallback, so anything that blocks here stalls that queue.
+- HTTP only on 8082 — no gRPC port and no second connector. The proto in `services/contracts` is the device-command contract and has nothing to do with rewards.
+- `voiceLineId` is an identifier string and nothing more. Do not store, serve or bundle audio: `admin-web` displays the id and the firmware ignores it.
+- Root package is `com.cybersixseven.reward`, not `rewardservice`.
+- No OpenTelemetry dependency here. Tracing arrives via the `-javaagent` at v0.7 with `OTEL_SERVICE_NAME=reward-service`.
+
+## Why the Kotlin compiler plugins exist — the failure that wastes the most time
+
+- **Kotlin classes and members are `final` by default.** Spring proxies beans by generating a CGLIB subclass, so a final `@Configuration` or AOP-advised class fails context startup with `Cannot subclass final class` — and a final *method* on an open class is worse, because it is silently never advised and the annotation just appears to do nothing.
+- The `spring` compiler plugin (all-open) marks `@Component`/`@Configuration`/`@Transactional` classes `open` at compile time. Configure it, and never work around a proxy error by sprinkling `open class` by hand or by flipping `proxyBeanMethods = false`.
+- The `jpa` plugin (no-arg) synthesises the no-arg constructor Hibernate needs to instantiate entities reflectively. This module has no entities — keep the plugin configured per `05-tech-stack.md`, but that is not permission to add one.
+- The parent already binds `kotlin-maven-plugin`'s `compile`/`test-compile` executions and sets `<jvmTarget>${java.version}</jvmTarget>`. Declare only `<configuration><compilerPlugins>` plus the `kotlin-maven-allopen`/`kotlin-maven-noarg` plugin dependencies; re-declaring executions or `jvmTarget` here is how the module ends up compiling twice or against the wrong target.
+- Maven does not compile `src/main/kotlin` by default — set `<sourceDirectory>` and `<testSourceDirectory>` under `<build>`. Miss it and the build "succeeds" with an empty jar and no error message.
+- Pass `-Xjsr305=strict` so Spring's `@Nullable`/`@NonNull` are enforced as real Kotlin types instead of permissive platform types.
+
+## Dependencies — the complete list
+
+- `spring-boot-starter-web`, `com.fasterxml.jackson.module:jackson-module-kotlin`, `org.jetbrains.kotlin:kotlin-reflect` (all Boot-managed, no `<version>`), plus test-scope `spring-boot-starter-test` and `io.mockk:mockk:1.14.11`. Anything else: stop and list it rather than adding it.
+- `jackson-module-kotlin` is not optional. Without it Jackson cannot see Kotlin constructor parameter names or defaults, so every `data class` DTO deserialises with `null` in non-null fields and blows up far from the cause. `kotlin-reflect` is what it needs to do that; `kotlin-stdlib` arrives transitively through it, so never list the stdlib yourself.
+- MockK's own pom pulls `kotlin-stdlib:2.2.21`, but Boot's imported `kotlin-bom:2.3.21` wins in `dependencyManagement`. That mismatch in `dependency:tree` is expected — do not "fix" it with an `<exclusion>` or by pinning `kotlin-stdlib`.
+
+## Kotlin, not Java written in Kotlin syntax
+
+- DTOs are `data class`es with `val` properties — not a class with explicit getters, not a Java `record`, no `@JvmRecord`.
+- Jakarta constraints on a constructor property need the use-site target: `@field:Min(0) val score: Int`. A bare `@Min` binds to the constructor *parameter*, Bean Validation never sees it, and `@Valid` then validates nothing while looking correct.
+- `val` everywhere. A `var` in a bean here is a bug: Spring beans are singletons and `device-command-service` calls this concurrently from its poller.
+- Never `!!`, never `lateinit var` for a dependency, and never widen a DTO field to `Int?`/`String?` just to stop Jackson complaining — a missing required field should be a 400. Use `?:` with a real default, or `requireNotNull(x) { "message" }`.
+- Constructor injection through the primary constructor with **no annotation at all**: `@RestController class RewardController(private val selector: RewardSelector)`. Spring resolves a single constructor on its own, and an `@Autowired` here reads as a Java habit.
+- Drop the Java tics: no `public` modifier, no hand-written getters/setters, no `Optional`, no `Stream`, no `StringBuilder`, no `companion object` used only as a bag of statics (use a file-level `private const val`). Use expression bodies, string templates, `when`, and `coerceIn`.
+
+## The strategy set
+
+- Model the three strategies as a **`sealed interface RewardStrategy`** with the implementations in the same package, so the set is closed and the compiler can prove a dispatch is exhaustive. Keep each implementation stateless and free of Spring types so its test needs no application context.
+- Selection lives in a `RewardSelector`, never in the controller. Wherever selection dispatches on the strategy type, the `when` takes **no `else` branch** — exhaustiveness turns "someone added a fourth strategy and forgot to wire it" into a compile error instead of a silent fall-through to the default.
+- Clamp the returned `intensity` with `coerceIn` to a range defined once as a constant. `device-command-service` copies this value straight into the MQTT payload the firmware reads, so an out-of-range or negative intensity reaches a physical device.
+- Handle `totalQuestions == 0` explicitly before computing any ratio: `score / totalQuestions` on `Int`s throws `ArithmeticException`, which surfaces as a 500 inside someone else's queue consumer.
+
+## Tests
+
+- Mock with MockK only — `mockk()`, `every { ... } returns ...`, `verify { ... }`, `mockk(relaxed = true)` for collaborators you do not assert on. `spring-boot-starter-test` drags Mockito in transitively; do not use it here and do not add `mockito-kotlin`.
+- Do not add `kotlin-test-junit5` or Kotest. The module runs on the Boot-managed JUnit 6, and a second engine or assertion library is not worth it at this size.
+- Strategy and selector tests are plain unit tests with no `@SpringBootTest`; at most one Spring test for the controller's JSON contract. A five-class service does not need a slice test per class.
+- Cover the edges the selector actually has — `0/0`, zero score, full score, and both band boundaries — as one `@ParameterizedTest` with `@CsvSource`, not four near-identical methods.

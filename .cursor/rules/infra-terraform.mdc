@@ -1,0 +1,52 @@
+---
+description: Terraform 1.16 / AWS provider 6.x authoring rules for CyberSixSeven — the exact v0.8 resource set, remote state, Secrets Manager handling, and the provider-v6 breaking changes that invalidate memorized examples
+globs: infra/terraform/**
+alwaysApply: false
+---
+
+## Versions and the v6 problem
+
+- `required_version = ">= 1.16"` (local is 1.16.2), `hashicorp/aws` at `~> 6.64`. Commit `.terraform.lock.hcl` — an uncommitted lock means CI resolves a different provider than local and the plans disagree.
+- **AWS provider 6.x is a major bump.** Most HCL in tutorials, blog posts and your own recall is v3/v4-era and will not apply. A wrong-but-plausible attribute fails partway through `apply`, after half the stack exists and while state already holds the other half — the most expensive failure mode in this whole repo. When you are unsure of an argument name, say so and stop; do not guess.
+- v6 makes `region` a per-resource argument. Keep one `provider "aws"` block; add an aliased provider only when a resource genuinely needs another region. The ALB's ACM cert belongs in the **ALB's own region** — the us-east-1 rule is CloudFront-only, and copying it here produces a cert the listener cannot attach.
+
+## S3: the single most-copied v6 breakage
+
+- `aws_s3_bucket` now takes essentially name + tags. The inline `acl`, `versioning`, `server_side_encryption_configuration`, `lifecycle_rule`, `logging` and `cors_rule` blocks were **removed**, not deprecated. Each is a separate resource: `aws_s3_bucket_versioning`, `aws_s3_bucket_server_side_encryption_configuration`, `aws_s3_bucket_lifecycle_configuration`, `aws_s3_bucket_public_access_block`.
+- `cybersixseven-accessories` gets `aws_s3_bucket_public_access_block` with all four flags `true`, plus SSE. Objects stay private — `model-gen-service` mints short-lived presigned URLs (device plan v0.4). Never `acl = "public-read"`, and do not add `aws_s3_bucket_acl` at all: ACLs are disabled by default under the current object-ownership default and the resource then errors.
+
+## State
+
+- Backend is S3 with `use_lockfile = true` (native S3 locking, Terraform ≥ 1.10). Do **not** create a DynamoDB lock table and do not use the deprecated `dynamodb_table` backend argument — that is the pre-1.10 pattern.
+- `backend` blocks accept no variables or interpolation. Hardcode bucket/key/region, and keep the state bucket itself out of this configuration — a config cannot create its own backend.
+- State is not a secret store. Anything Terraform reads or generates is stored in plaintext in state, which is why the rules below exist.
+
+## Secrets
+
+- No secret, password, API key or OAuth client ID in `*.tfvars`, in a `variable` default, or in `locals`. Secrets Manager holds them.
+- ECS task definitions reference them through the container `secrets` block (`valueFrom` = secret ARN) so the value is resolved by the ECS agent and never enters Terraform state or a task-definition diff. Never pass a secret through `environment`.
+- RDS: set `manage_master_user_password = true` and let RDS own the generated secret. Never define a `db_password` variable, and never add a `data "aws_secretsmanager_secret_version"` just to wire a value into a task definition — reading it is what leaks it.
+
+## The resource set — exactly backend v0.8, nothing invented
+
+- Four ECS/Fargate services: `platform-api`, `device-command-service`, `reward-service`, `model-gen-service`. Only `platform-api` gets an ALB target group; the other three are internal (`model-gen-service` is an SQS consumer and needs no listener at all).
+- Container ports come from the fixed port map in `06-cursor-guardrails.md` §5 — do not invent or remap one. `platform-api`'s ALB health check is `/actuator/health`. If `device-command-service`'s gRPC port is ever exposed, its target group needs `protocol_version = "GRPC"` and a gRPC health-check matcher; an HTTP1 target group silently marks every gRPC task unhealthy.
+- RDS Postgres 17 · ElastiCache Redis 7 · DynamoDB `device_events` · SNS `submission-events` · S3 `cybersixseven-accessories` · ALB + ACM cert for `api.<domain>` · one ECR repo per image · IoT Core thing + policy. Adding anything beyond this list needs to be raised first, per `06-cursor-guardrails.md` §2.
+- `device_events`: `billing_mode = "PAY_PER_REQUEST"`, hash key on the submission id — that is the consumer's idempotency key, so the schema has to support a point read. Do not also set `read_capacity`/`write_capacity`; the combination is rejected.
+- `submission-events` has exactly two subscriptions — `device-commands` and `model-gen-jobs` — **each with `raw_message_delivery = true`**. Without it SQS delivers a `{"Type":"Notification","Message":"<escaped json>"}` envelope, both consumers stop matching, and there is no error anywhere to find.
+- Each of those two queues needs its own DLQ: `redrive_policy` on the source queue plus `aws_sqs_queue_redrive_allow_policy` on the DLQ. Each also needs an `aws_sqs_queue_policy` permitting `sns.amazonaws.com` conditioned on `aws:SourceArn` — a topic subscription without it succeeds at plan time and delivers nothing.
+- ACM: `aws_acm_certificate` with `validation_method = "DNS"`, the Route53 validation records, **and** `aws_acm_certificate_validation`. Skip the validation resource and the listener attaches a `PENDING_VALIDATION` cert — apply hangs or fails at the listener, not at the cert.
+- IoT: `aws_iot_thing` plus an `aws_iot_policy` scoped to this thing's topics only — publish on `topic/devices/${iot:Connection.Thing.ThingName}/status`, subscribe on `topicfilter/devices/${iot:Connection.Thing.ThingName}/commands`, connect as `client/${iot:Connection.Thing.ThingName}`. Never `iot:*` on `Resource = "*"`; the topic scoping is the entire point of provisioning IoT in Terraform rather than by hand.
+- **Escape IoT policy variables for Terraform: write `$${iot:Connection.Thing.ThingName}`.** A single `$` makes Terraform attempt interpolation and the plan dies on an invalid reference — this bites on every IoT policy copied from AWS docs.
+
+## Idempotency
+
+- `terraform plan` run immediately after `apply` must be empty. If it is not, fix the configuration; never re-apply to "settle" it.
+- CI deploys ECS by registering a new task-definition revision, so each `aws_ecs_service` needs `lifecycle { ignore_changes = [task_definition, desired_count] }`. Without it every plan proposes reverting the most recent deploy.
+- Never `timestamp()`, `uuid()` or `bcrypt()` in a resource argument — each guarantees a permanent diff and a never-empty plan.
+- ECR repositories are created here; **images are pushed by CI**. Do not manage image tags, lifecycle-pushed tags, or a `latest` pointer from Terraform.
+
+## Layout and proof
+
+- One concern per file: `network.tf`, `ecs.tf`, `data.tf` (RDS/ElastiCache/DynamoDB), `messaging.tf` (SNS/SQS/DLQs), `storage.tf`, `iot.tf`, `variables.tf`, `outputs.tf`. No single `main.tf` holding the stack.
+- `terraform fmt -check` and `terraform validate` must be clean, and `terraform plan` must have actually run, before reporting done — paste the real output per `06-cursor-guardrails.md` §1. A plan that was never executed is not evidence.

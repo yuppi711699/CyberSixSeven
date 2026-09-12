@@ -1,0 +1,44 @@
+---
+description: Project-wide conventions for CyberSixSeven — always in effect
+alwaysApply: true
+---
+The developer is a strong React/TypeScript engineer and a **beginner on the JVM**. They cannot critically review Java, Maven or Spring code. These rules substitute for that review — follow them literally.
+
+## Before reporting done
+- Run the build and **paste the real command output**: `./mvnw -q verify` (JVM module), `pnpm -w build && pnpm -w lint` (frontend), `pytest -q` (Python).
+- Never report success on code you have not compiled. If it does not build, say so and stop — do not keep editing to hide the failure.
+
+## Scope
+- Do not add any dependency, plugin, module or file the prompt does not name. If you believe one is required, **stop and list it** instead of adding it.
+- Do not modify files outside the module named in the prompt.
+- Do not upgrade the Spring Boot parent or change any version pinned in `05-tech-stack.md`.
+- Do not refactor unrelated code while you are in there.
+- When genuinely unsure, state the ambiguity and ask. A wrong guess that compiles survives review and surfaces three versions later.
+
+## Java and Spring
+- Root package is `com.cybersixseven.<service>` — never start.spring.io's `com.example.demo`.
+- **No Lombok.** Java 21 `record` for DTOs; plain classes with explicit getters for JPA entities.
+- Constructor injection only. No `@Autowired` fields.
+- `@Transactional` only on public service methods — never controllers, never private methods. A self-invoked `@Transactional` method silently does nothing.
+- Never publish to a queue or call another service inside a `@Transactional` block. Use `@TransactionalEventListener(phase = AFTER_COMMIT)` — a rollback after a publish emits a phantom event downstream services act on.
+- Never return a JPA entity, `List<Entity>` or `Page<Entity>` from a controller. Map to a DTO.
+- Every `SecurityFilterChain` bean needs an explicit `@Order` **and** a `securityMatcher`. A chain without a matcher swallows every request.
+- Every outbound HTTP or gRPC call gets an explicit connect and read timeout. An untimed call from a queue consumer stalls the queue with no error.
+- No empty `catch`, no `e.printStackTrace()`, never widen a signature to `throws Exception` to make something compile.
+
+## Database
+- `id` columns are `uuid`; timestamps are `timestamptz`; `answers` is `jsonb` mapped with `@JdbcTypeCode(SqlTypes.JSON)` — not `String`, and do not add `hypersistence-utils`.
+- **Flyway migrations are immutable.** Never edit an existing `V*__*.sql`; add `V<n+1>__`. Flyway fails on checksum mismatch, and the instinctive fix — `ddl-auto: update` — destroys the schema-as-code story.
+- `spring.jpa.hibernate.ddl-auto` is `none`. Always. `spring.jpa.open-in-view` is `false`.
+
+## Fixed ports — assign once, never vary
+`platform-api` 8080 · `device-command-service` 8081 HTTP / 9090 gRPC · `reward-service` 8082 · `model-gen-service` 8000 · `student-web` 3000 · `admin-web` 3001 · Postgres 5432 · Redis 6379 · LocalStack 4566 · Mosquitto 8883 · Jaeger 16686 UI / 4317 OTLP
+
+## Local AWS
+- **LocalStack is the only AWS emulator.** Do not also run `amazon/dynamodb-local` — one endpoint, less RAM, fewer traps.
+- Set `AWS_ACCESS_KEY_ID=test`, `AWS_SECRET_ACCESS_KEY=test`, `AWS_REGION=us-east-1`, or the SDK fails with "Unable to load credentials".
+- Queues, topics, buckets and tables come from a re-runnable init script, never a hand-typed command.
+
+## Secrets
+- Never a literal secret, key, password or client ID in source. Config or environment only; `.env.example` committed, real values in Vercel or Secrets Manager.
+- Compare shared secrets with `MessageDigest.isEqual` on UTF-8 bytes, not `String.equals`.

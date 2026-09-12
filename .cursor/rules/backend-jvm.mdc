@@ -1,0 +1,36 @@
+---
+description: Maven/Spring Boot 4.1.1 build rules, pinned vs Boot-managed versions, JPA/Flyway wiring, Kotlin module config and JUnit 6 / Testcontainers 2.x testing for the CyberSixSeven JVM services
+globs: services/platform-api/**,services/device-command-service/**,services/reward-service/**,services/contracts/**
+alwaysApply: false
+---
+
+## Build and versions
+
+- Every module's parent is `org.springframework.boot:spring-boot-starter-parent:4.1.1`. Maven Central's `<release>` tag currently points at `4.2.0-M1`, which is a milestone — never use it, and never bump the parent to "fix" a resolution failure.
+- Omit `<version>` for everything Boot 4.1.1 manages: all `spring-boot-starter-*`, grpc-java (1.83.1), protobuf-java (4.35.1), `io.github.ascopes:protobuf-maven-plugin` (5.1.8), `kotlin-maven-plugin` (2.3.21), Flyway (12.4.0), JUnit Jupiter (6.0.3), Mockito (5.23.0), Testcontainers (2.0.5), PostgreSQL JDBC (42.7.13). A hand-written version on any of these is the usual cause of two conflicting copies on the classpath.
+- Exactly these coordinates carry an explicit version, because Boot does **not** manage them: `software.amazon.awssdk:bom:2.54.17` (import scope in `<dependencyManagement>`), `org.bouncycastle:bcprov-jdk18on:1.86`, `org.eclipse.paho:org.eclipse.paho.mqttv5.client:1.2.5`, `com.giffing.bucket4j.spring.boot.starter:bucket4j-spring-boot-starter:0.14.0`, `io.mockk:mockk:1.14.11`. The OTel javaagent `2.31.1` is a `-javaagent` jar, not a Maven dependency — never add it to a `<dependency>` block.
+- Never pin `spring-security-*` explicitly — Central's `<release>` is `7.2.0-M1`, a milestone. Take whatever the parent resolves.
+- Java release is 21 (`<java.version>21</java.version>`). Boot 4.1's floor is 17; 21 is a deliberate choice. Do not drop to 17, raise to 25, or enable `--enable-preview`.
+- Build with the committed wrapper: `./mvnw` from inside the module. Never add a `build.gradle`/`settings.gradle`, never invoke a system `mvn`.
+- All three Spring services are servlet-stack (`spring-boot-starter-web`). Do not add `spring-boot-starter-webflux` or return `Mono`/`Flux`: WebFlux on the classpath silently switches the app to a reactive context, and the servlet `SecurityFilterChain` beans stop being applied at all.
+
+## Persistence
+
+- `platform-api` needs **both** `org.flywaydb:flyway-core` and `org.flywaydb:flyway-database-postgresql` (neither with a version). Since Flyway 10 the Postgres dialect is a separate module; with only `flyway-core` the context fails at startup with an "Unsupported Database: PostgreSQL" error.
+- JPA entities need a `protected` no-arg constructor alongside the real one, plus explicit getters. Hibernate instantiates entities reflectively, so a missing no-arg constructor is a *runtime* failure on the first query, not a compile error.
+- Paged admin endpoints return `Page<SomeDto>` built with `page.map(...)`, never `Page<Submission>`. With `spring.jpa.open-in-view: false`, Jackson serializing an entity page triggers a lazy load outside the session and turns into a 500.
+
+## Testing
+
+- Testcontainers here is **2.x**: the artifacts are `org.testcontainers:testcontainers-postgresql` and `org.testcontainers:testcontainers-junit-jupiter` (no version). The 1.x names `org.testcontainers:postgresql` and `org.testcontainers:junit-jupiter` do not resolve at all.
+- Testcontainers 2.x moved container classes and removed no-arg constructors: import `org.testcontainers.postgresql.PostgreSQLContainer` and always pass an image — `new PostgreSQLContainer("postgres:17")`. Any snippet using `new PostgreSQLContainer<>()` or `org.testcontainers.containers.PostgreSQLContainer` is 1.x and will not compile.
+- Wire containers with `@Testcontainers` plus `@ServiceConnection` on the container field (Postgres and Redis). Do not hand-roll `@DynamicPropertySource` datasource plumbing.
+- These are **JUnit 6**, not 5. `@CsvSource` parsing is stricter — quote any value containing a comma or blank. `junit-platform-runner` and `@RunWith(SpringRunner.class)` no longer exist; use `@ExtendWith`/`@SpringBootTest` only.
+- Integration tests run against the real Postgres and Redis containers. Do not substitute H2, an embedded Redis, or a mocked `JpaRepository` — H2 in particular will not accept the `jsonb` column or the `uuid` defaults.
+- Java services mock with Mockito (Boot-managed 5.23.0). `reward-service` mocks with MockK `1.14.11` — Mockito cannot mock Kotlin's `final`-by-default classes without the inline mock maker, so do not reach for it there.
+
+## reward-service (Kotlin)
+
+- `reward-service` builds with `kotlin-maven-plugin` (version from the parent) configured with **both** the `spring` and `jpa` compiler plugins. Without `spring` (all-open), every `@Configuration`/`@Service` class stays `final` and Spring's CGLIB proxying fails at context startup.
+- Do not pin Kotlin `2.4.x` from Central — the parent manages `2.3.21`, and a mismatch between the plugin and stdlib versions produces metadata errors that read like unrelated compile failures.
+- `RewardStrategy` is an interface with three implementations selected at runtime. Inject them as a `List<RewardStrategy>` (or `Map<String, RewardStrategy>`) and pick one; do not collapse it into a `when` over score thresholds inside the controller — the Strategy shape is the point of this module.

@@ -1,0 +1,44 @@
+---
+description: Token storage, refresh-cookie, single-flight refresh and Google OAuth rules for packages/auth-client and packages/api-client — the highest-risk area of the CyberSixSeven frontend
+globs: packages/auth-client/**,packages/api-client/**,apps/**/login/**,apps/**/layout.tsx,apps/**/middleware.ts
+alwaysApply: false
+---
+
+## Where the tokens live
+
+- Access token (~10 min): **in memory only**, in the React context in `packages/auth-client`. Never `localStorage`, never `sessionStorage`, never a JS-readable cookie, never a TanStack Query cache entry, never a persisted store. Any XSS reads all of those; it cannot read a closure.
+- Refresh token: opaque, server-issued, `HttpOnly; Secure; SameSite=Lax; Path=/api/auth/refresh`, set by `platform-api` on `api.<domain>` and stored in Redis so it can be revoked. Frontend code never reads, writes or clears it — `logout()` calls `POST /api/auth/logout`, it does not touch `document.cookie`.
+- Every `fetch` in `packages/api-client` sets `credentials: 'include'`. Omit it and the refresh call carries no cookie and 401s forever, which looks exactly like a broken server-side refresh and will send you debugging the wrong service.
+- `SameSite=Lax` is correct here because `app.<domain>`, `admin.<domain>` and `api.<domain>` share one registrable domain. Do **not** switch to `SameSite=None` to fix a cookie problem: `vercel.app` is on the Public Suffix List, so a `*.vercel.app` frontend plus an API elsewhere is irreducibly cross-site, and Safari has blocked third-party cookies unconditionally since 2020. `None` is broken today, not deprecated later.
+- Do not implement silent-iframe refresh. It depends on third-party cookies and dies in Safari for exactly the same reason.
+- Verify login in **Safari** specifically. Chrome passing proves nothing about any of the above.
+
+## Single-flight refresh — the rule most likely to be got wrong
+
+- Refresh must be a module-level single-flight: one `let refreshPromise: Promise<string> | null`. On a 401, if it is non-null `await` that same promise; otherwise assign it and clear it in a `finally`.
+- Reason: refresh tokens **rotate server-side and the old one is deleted on use**. Two parallel 401s that each POST `/api/auth/refresh` means the second rotation invalidates the first response's token and the user is logged out mid-session.
+- This only misbehaves under concurrency, so it passes every manual click-through. It must be unit-tested with two simultaneous 401s asserting exactly one `POST /api/auth/refresh`.
+- Retry each original request **at most once** after a successful refresh. Never retry the refresh call itself, and never let a retried request re-enter the 401 handler — that is an infinite loop against a dead session.
+- On refresh failure: clear the in-memory token, clear the Query cache, and redirect to login exactly **once**. N concurrent failures must not each push a navigation.
+- Do not put refresh logic in a React `useEffect`, a TanStack Query `retry` callback, or a per-component wrapper. It belongs in the single `fetch` wrapper in `api-client` so there is one place where 401 is handled.
+
+## Dependency direction
+
+- `packages/api-client` exposes `configureClient({ getAccessToken, onUnauthorized })`. `packages/auth-client` imports `api-client` and calls `configureClient` when its provider mounts.
+- **`api-client` must never import `auth-client`.** pnpm links the cycle happily and TypeScript often typechecks it; it surfaces at runtime as an `undefined` import from a half-initialised module, in whichever app loaded the modules in the unlucky order.
+- Never call `configureClient` at module top level or from a Server Component — it needs the live context value, and on the server there is no token to give it.
+
+## Google OAuth
+
+- "Sign in with Google" is a plain anchor performing a **full navigation** to `${NEXT_PUBLIC_API_BASE_URL}/oauth2/authorization/google`. Not `fetch` (CORS + an opaque redirect give you nothing), not a popup, not a client-side SDK — the flow ends with the API setting the refresh cookie and redirecting back.
+- The Google **client ID lives server-side in `platform-api`**. It must not appear in frontend source, in `.env.example`, or in any `NEXT_PUBLIC_*` variable. The frontend needs only the API base URL.
+- Do not install `next-auth`/`@auth/*`, `@react-oauth/google`, or any other auth SDK. They would own the session and duplicate — then contradict — the in-memory-access-token model.
+- Registered redirect URIs: the production domain plus exactly **one stable branch URL** (`<project>-git-<branch>-<scope>.vercel.app`). Never per-commit preview URLs — they change on every push and Google requires exact matches. Consequence: per-commit previews cannot do Google login. That is expected; do not build a workaround.
+
+## Guards and roles
+
+- Route guards are client-side redirects only (see the Next rules: middleware cannot see auth state here). Guard the question and results routes in `student-web`.
+- `admin-web` rejects any role other than `TEACHER` or `ADMIN` with an **explicit on-screen message**, not a silent bounce to login — a blank redirect reads as "wrong password" and costs an hour.
+- Client-side role checks are UX only. `platform-api` returns 403 and is the actual boundary. Never let a client role decide whether a request is worth sending.
+- Decoding the access token in the browser is for rendering only. Do not add a JWT library for it and never attempt signature verification client-side — the tokens are symmetric HS256 and the key can never reach the browser.
+- Never log, serialise or send the access token anywhere but the API origin from env. In particular the v0.8 error boundary's structured JSON must not include headers, the token, or a whole request object.

@@ -1,0 +1,50 @@
+---
+description: Python version floor, pinned dependencies, build123d geometry, idempotent SQS-to-S3 consumer and the boto3sqs trace-propagation trap for services/model-gen-service
+globs: services/model-gen-service/**
+alwaysApply: false
+---
+
+## Interpreter and pins
+
+- **Python 3.12 or 3.13. Never 3.10.** `cadquery-ocp-novtk`, pulled in transitively by build123d, publishes no cp310 wheel, so `pip install` fails outright — build123d's own metadata advertising 3.10 support is wrong. 3.11 works too; do not target it without a reason.
+- Plain `python3.13 -m venv .venv` then `pip install -r requirements.txt`. No conda, no mamba, no Docker workaround, and no migration to poetry/pdm/pipenv — the OpenCascade fragility those used to work around is resolved, and plain pip works on Apple Silicon.
+- Every dependency is pinned with `==`, runtime and test alike. An unpinned `build123d` silently resolves a different OCP build on the next machine and the STL changes shape with no code change.
+- The pins: `build123d==0.11.1`, `fastapi==0.141.1`, `uvicorn==0.42.0`, `boto3==1.43.93`, and for tests `moto==5.2.3` plus a pinned `pytest`. Do **not** add `cadquery-ocp-novtk` yourself — it arrives transitively at `8.0.1.0.0`, and hand-pinning it is how you end up with the VTK-carrying variant instead of the `-novtk` one.
+- OTel is `opentelemetry-sdk==1.44.0` with **every** `opentelemetry-instrumentation-*` at `0.65b0` (`-distro`, `-fastapi`, `-botocore`, `-boto3sqs`). SDK and instrumentation are a matched pair: bump both or neither — a mixed pair fails when instrumentation loads, not at install time, so it looks like a runtime bug.
+
+## The SQS trace trap
+
+- `opentelemetry-instrumentation-botocore` performs **no** trace-context propagation for SQS. SNS propagates; SQS does not, and nothing extracts context on receive. `opentelemetry-instrumentation-boto3sqs==0.65b0` is mandatory and must actually be active in the consumer process, not merely present in `requirements.txt`.
+- The symptom when it is missing: `model-gen-service` shows up in Jaeger as a completely disconnected trace and the JVM side looks broken when it is fine. Check this before touching `platform-api`.
+- Set `OTEL_SERVICE_NAME=model-gen-service`, or every span lands under `unknown_service`. Export OTLP to the local Jaeger collector; no vendor-specific exporter.
+- Keep total SQS message attributes at **≤8**. AWS caps at 10, and context injection is skipped *silently* once the cap is hit — which quietly removes the propagation you just installed.
+
+## Scope — STL generation plus its queue/S3 wrapper, nothing else
+
+- This service generates STLs, consumes its queue, and uploads to S3. No scoring, no grading rules, no question/submission domain logic, no auth decisions, no Postgres, no ORM, and no user-facing endpoint beyond `GET /health` returning `{"status":"ok"}`. If something appears to need one, it belongs in `platform-api` — stop and say so.
+- It knows the `submissionId` and the generation parameters from the message body, and nothing else. It never reads the database and never re-derives a score.
+- Keep the module list short: `app/main.py` (health), `app/consumer.py`, `app/geometry.py`, and a thin S3/callback helper. A growing module list is the signal that business logic is leaking in.
+
+## SQS consumer
+
+- The poller is its own entrypoint (`python -m app.consumer`), not a thread or a FastAPI `startup`/lifespan hook. Started inside the web app, `uvicorn --workers N` gives you N pollers racing for the same messages.
+- Long-poll with `WaitTimeSeconds=20` and a small `MaxNumberOfMessages`. STL generation is slow, so the queue's visibility timeout must exceed worst-case generate-plus-upload time; otherwise SQS redelivers while the first attempt is still running and the work happens twice.
+- **Idempotency is keyed on `submissionId`** and checked before any work starts. SQS is at-least-once, and the acceptance criterion is literally "kill it mid-processing, restart, no duplicate S3 objects".
+- The S3 key is deterministic: `accessories/{submissionId}.stl`. Never a uuid4, timestamp or content hash — that determinism is what makes a retry an overwrite rather than a duplicate.
+- **Delete the message only after every step succeeds**: STL generated, object uploaded, and `PATCH /internal/submissions/{id}/accessory` accepted. Deleting on receipt loses the job with no trace that it existed.
+- The callback sends `X-Internal-Api-Key` from the environment and **must** pass an explicit `timeout=(connect, read)`. `requests` has no default timeout, so one hung call parks the poller forever with no error and the whole queue stops behind it.
+- Never swallow an exception: no bare `except:`, no `except Exception: pass`, no returning a placeholder URL on failure. Log at ERROR with the `submissionId` and `exc_info=True`, leave the message undeleted, and let repeated failures reach the DLQ. The DLQ is redrive-policy configuration in the LocalStack init script and Terraform — the consumer never implements its own retry or park logic.
+- Uploaded objects stay private. No long-lived presigned URLs — mint short-lived ones or serve the file through `platform-api`.
+
+## Geometry
+
+- `app/geometry.py` exposes `generate_accessory(height_mm: float, radius_mm: float) -> Path` — a cone frustum fused to a torus brim. Every dimension is a named parameter with a default; no numeric literals buried in the build. Showing parametric CAD is the entire point, and a hard-coded export defeats it.
+- Dimensions carry the `_mm` suffix and are millimetres. build123d is unitless, so a mislabelled parameter is a 10x scale error you discover only after printing it.
+- The export must be one valid, non-degenerate **solid**: closed, positive volume, brim genuinely fused to the frustum rather than two overlapping shells. Assert that in a test; do not eyeball it in a viewer.
+- `generate_accessory` is a pure function — no boto3, no `os.environ`, no S3, no logging setup. The consumer owns all I/O.
+
+## Tests
+
+- `pytest` with `moto==5.2.3`. Moto 5 replaced the per-service decorators with a single `mock_aws`; every `mock_s3`/`mock_sqs` example you find online is moto 4.x and will not import.
+- Test the geometry for real: assert a valid solid, volume greater than zero, and the expected bounding box for the default parameters. Never mock build123d — mocking the CAD kernel asserts nothing about the STL.
+- Integration-test the SQS-to-S3 path under `mock_aws`, covering the two cases that matter: the same `submissionId` delivered twice yields one object and one callback, and a failing S3 upload leaves the message undeleted. Never point a test at real AWS or at a running LocalStack.

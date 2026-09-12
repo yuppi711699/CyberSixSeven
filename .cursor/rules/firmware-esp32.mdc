@@ -1,0 +1,55 @@
+---
+description: ESP32 firmware rules for CyberSixSeven — PlatformIO pins, ArduinoJson v7 (not v6), PubSubClient buffer sizing, clock-before-TLS, non-blocking reconnect, secrets handling, and the encouraging-feedback product rule
+globs: firmware/esp32/**
+alwaysApply: false
+---
+
+## platformio.ini — pin everything
+
+- PlatformIO Core 6.2.0. `platform = espressif32@<exact version>`, `framework = arduino`, `monitor_speed = 115200`. Pin the platform to an exact version: a floating `espressif32` silently swaps the underlying Arduino core, and the LEDC, ADC and `Preferences` APIs differ between core 2.x and 3.x.
+- `lib_deps` pinned exactly: `bblanchon/ArduinoJson@7.4.3` and `knolleary/PubSubClient@2.8`. No caret ranges, no `latest`.
+- Build with `pio run` and paste the real output before reporting done (`06-cursor-guardrails.md` §1). "This should compile" is not a result — and given the v6/v7 issue below, it very often does not.
+
+## ArduinoJson is v7 — most examples you have seen are v6
+
+- `StaticJsonDocument` and `DynamicJsonDocument` were **removed** in v7. Use `JsonDocument doc;` with no capacity template parameter and no size argument. If you find yourself typing a capacity, you are writing v6 and it will not compile.
+- `containsKey()` is deprecated in v7; test with `doc["event"].is<const char*>()` before reading.
+- Always capture and check the result: `DeserializationError err = deserializeJson(doc, payload, length); if (err) { log and return; }`. A malformed or retained message must not take the handler down.
+
+## PubSubClient 2.8 — unmaintained, and you have to work around it
+
+- Last release was 2020. It is still the most-documented ESP32 MQTT client, so work within its limits; do not swap it for `arduino-mqtt` or `esp-mqtt` without asking first.
+- **The callback payload is not null-terminated.** Use the `length` argument (`deserializeJson(doc, payload, length)`); never `String((char*)payload)`, `strcmp` or `strlen` on it — you will read whatever follows in the buffer, intermittently.
+- Raise the buffer in **both** places: `build_flags = -D MQTT_MAX_PACKET_SIZE=512` in `platformio.ini` **and** `client.setBufferSize(512)` at runtime. The library compiles as its own unit, so the define alone is unreliable, and the 256-byte default truncates larger payloads with no error and no callback.
+- Do no real work inside the MQTT callback — it runs inside `client.loop()`. Copy the fields you need, set a flag, and act from `loop()`. Publishing from inside the callback re-enters the client's single shared buffer.
+- Call `client.loop()` on every pass of `loop()`. Skip it and the keepalive lapses, so the broker drops you at the timeout and the disconnect looks like a network fault.
+
+## TLS: set the clock first
+
+- **Call `configTime()` and block until the clock is real (e.g. `time(nullptr) > 1700000000`) before the first TLS handshake.** X.509 validation fails against an unset clock, and the failure mode is a silent reconnect loop that is indistinguishable from a Wi-Fi problem. This costs an afternoon every time it is skipped.
+- TLS is `WiFiClientSecure` with `setCACert()`, `setCertificate()` and `setPrivateKey()` reading PROGMEM strings from `secrets.h`. **Never `setInsecure()`** — not as a debugging step, not behind an `#ifdef`. It silently survives into the demo build.
+- Broker host and port (8883) are compile-time constants so one binary targets local Mosquitto and AWS IoT Core unchanged; the only difference is which certificates are compiled in.
+
+## loop() never blocks
+
+- No `while (!client.connected()) { delay(...); }` — not in `setup()`, and absolutely not in `loop()`. Reconnect on a `millis()` deadline with capped exponential backoff (about 1s → 30s).
+- No `delay()` inside LED, buzzer or motor patterns either. Drive feedback from a small `millis()` state machine, or every reaction stalls MQTT keepalive for its duration.
+- Track Wi-Fi and MQTT state separately. An MQTT-only retry loop spins forever when it was actually Wi-Fi that dropped, and that is the single most common firmware bug in this project.
+- Re-`subscribe()` after every successful reconnect. Subscriptions do not survive a session, so a silently resubscribe-less reconnect reads as "the backend stopped sending".
+
+## The wire contract is fixed by device-command-service
+
+- Subscribe `devices/{deviceId}/commands`; the payload is `{"event","intensity","submissionId"}` where `event` is `"correct"` or `"incorrect"`.
+- After handling, publish `{"deviceId","submissionId","status":"handled"}` to `devices/{deviceId}/status`. That ack is how the backend logs confirmed delivery rather than merely "sent" — it is not optional.
+- Do not rename a field, add one, or invent a topic. Both sides of this contract are already written.
+
+## Product rule — this is a children's learning device
+
+- The `"incorrect"` reaction must be **gentle and encouraging**: a soft LED pattern and a soft or rising tone. No harsh error buzz, no red flash, no descending "wrong" tone. A punishing failure sound is a product defect here, not a stylistic choice — the whole point is that a student wants to try again.
+- Scale `intensity` into the LED/motor pattern, and clamp it to a safe range rather than trusting the value on the wire.
+
+## Secrets and memory hygiene
+
+- Wi-Fi credentials, device id, broker host, and the CA certificate, client certificate and private key all live in `secrets.h`, which is **gitignored**. Commit `secrets.h.example` declaring the same symbols with placeholder values so the build breaks loudly for a fresh clone instead of compiling with someone's leftovers.
+- Never print a key, certificate or Wi-Fi password over serial, including at a debug log level.
+- Build topics and payloads with fixed `char` buffers and `snprintf`. Arduino `String` concatenation inside `loop()` fragments the heap and fails after hours of uptime — which is exactly the horizon a live demo runs on.

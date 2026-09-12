@@ -1,0 +1,48 @@
+---
+description: gRPC/protobuf contracts module, SNS fan-out and SQS consumer semantics, DynamoDB writes, Eclipse Paho MQTT publishing and OTel messaging propagation across platform-api, device-command-service and contracts
+globs: services/platform-api/**,services/device-command-service/**,services/contracts/**
+alwaysApply: false
+---
+
+## gRPC and protobuf
+
+- There is exactly **one** `.proto` in the repository: `services/contracts/src/main/proto/device_command.proto`. Both `platform-api` and `device-command-service` get their stubs by depending on `com.cybersixseven:contracts`. Never copy the proto into a service, never add a second one, never commit generated `*.java`.
+- `services/contracts` is a plain library jar. Do not add `spring-boot-maven-plugin` to it — the `repackage` goal rewrites the jar into an executable fat jar with classes under `BOOT-INF/classes`, after which both services resolve it as an empty dependency and every generated type "does not exist".
+- Codegen is `io.github.ascopes:protobuf-maven-plugin` with **no** `<version>` (Boot manages 5.1.8), using `<protoc kind="binary-maven">` with `${protobuf-java.version}` and a `<plugin kind="binary-maven">` entry for `io.grpc:protoc-gen-grpc-java` at `${grpc-java.version}`. Never `org.xolstice:protobuf-maven-plugin` (dead), never `os-maven-plugin`, never an `<extensions>` block, never `${os.detected.classifier}` — ascopes does its own platform detection and resolves `osx-aarch_64` cleanly.
+- The plugin's default source directory is `src/main/protobuf`; this repo uses `src/main/proto`, so the `<sourceDirectories>` block is mandatory. Leave it out and the build passes while generating zero classes.
+- The gRPC starters are `org.springframework.boot:spring-boot-starter-grpc-server` (device-command-service), `spring-boot-starter-grpc-client` (platform-api) and `spring-boot-starter-grpc-server-test` (test scope). **`spring-boot-starter-grpc` with no suffix does not exist** — it is the single most common invented coordinate here. Never `net.devh:grpc-spring-boot-starter`, frozen at 3.1.0.RELEASE since 2023.
+- gRPC listens on its own Netty server on 9090 while Tomcat serves 8081. That is expected — do not try to route gRPC through the servlet container, reuse 8081, or add a gRPC-Web proxy.
+- Proto field numbers are permanent. Add new fields with new numbers; never renumber, never reuse a number from a removed field (`reserved` it instead). `submission_id = 1`, `device_id = 2`, `event = 3`, `intensity = 4` keep those numbers forever.
+- Every client stub call sets an explicit deadline (`stub.withDeadlineAfter(...)`) and the channel sets a connect timeout. A gRPC call without a deadline blocks the calling thread indefinitely.
+- The only synchronous gRPC path is `POST /api/admin/devices/{id}/resend-command` → `SendCommand`. The normal submission → device flow stays on SNS/SQS; do not "simplify" it into a gRPC call.
+
+## SNS / SQS
+
+- `platform-api` publishes to the SNS topic `submission-events`. `device-commands` and `model-gen-jobs` are SQS subscriptions to that topic — do not reintroduce a direct `SqsClient.sendMessage` to `device-commands` from `platform-api`.
+- Both SNS→SQS subscriptions must be created with `RawMessageDelivery=true`. Without it the queue receives `{"Type":"Notification","Message":"<escaped json>"}`, the existing consumer parser stops matching, and nothing is logged — a silent no-op, not an error.
+- Publish the event from a `@TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)` on an application event raised by the scoring service. Never call SNS/SQS inside the `@Transactional` method: a rollback after a publish leaves a phantom event, and `device-command-service` will command a real device for a submission that does not exist in Postgres.
+- The SQS consumer is a `@Scheduled(fixedDelay = 0)` method in an `@EnableScheduling` context. Never a `while (true)` loop in `@PostConstruct`, a `CommandLineRunner`, or a bare `new Thread(...)` — a blocking loop in `@PostConstruct` stops the application context from ever finishing startup, and the health check never comes up.
+- Poll with `waitTimeSeconds(20)` (long polling) and `maxNumberOfMessages(10)`. Short polling combined with `fixedDelay = 0` bills a request per loop iteration and hammers LocalStack.
+- Delete the message **only after** the DynamoDB write and the MQTT publish have both returned successfully. On exception, log at ERROR with the `submissionId` and return without deleting, so the message reappears after the visibility timeout and eventually reaches its DLQ.
+- SQS is at-least-once: make the DynamoDB write idempotent on `submissionId` (conditional put with `attribute_not_exists`), so a redelivery or a restart mid-batch does not produce a duplicate row.
+- Consumer beans are singletons — hold no mutable instance state (no accumulating list, counter, or "last message" field). Two poll cycles overlap the moment one batch runs long.
+- Do not add `io.awspring.cloud:spring-cloud-aws-starter-sqs` — it targets Spring Boot 3. Use the plain AWS SDK v2 clients from the `2.54.17` BOM.
+
+## DynamoDB
+
+- Device events go to the `device_events` table through the AWS SDK v2 **Enhanced Client**: a `@DynamoDbBean` class with a `@DynamoDbPartitionKey`, resolved via `DynamoDbEnhancedClient`. Do not hand-build `Map<String, AttributeValue>` payloads with the low-level client.
+
+## MQTT
+
+- MQTT publishing uses Eclipse Paho **v5**: `org.eclipse.paho:org.eclipse.paho.mqttv5.client:1.2.5`, pinned (not Boot-managed). Import from `org.eclipse.paho.mqttv5.client`, never `org.eclipse.paho.client.mqttv3` — the class names are nearly identical, so mixing them compiles and then fails at runtime.
+- Topics are exactly `devices/{deviceId}/commands` for publishing (payload `{"event","intensity","submissionId"}`) and `devices/+/status` for the subscription that updates `devices.last_seen_at`. No other topic shape.
+- The broker URL is a config property in `ssl://host:8883` form so the same code targets local Mosquitto and AWS IoT Core. Never hardcode `localhost`, and never fall back to plaintext `tcp://`.
+- Set an explicit connection timeout and an explicit completion timeout, and never call `IMqttToken.waitForCompletion()` with no timeout — it blocks the SQS poller thread with no error and the whole queue silently stops draining.
+- `device-command-service` calls `reward-service` (`POST /reward/select`) to choose `intensity`, with explicit connect and read timeouts and a fallback default intensity on timeout or failure. An untimed call from the queue consumer stalls the queue.
+
+## Tracing across the hops
+
+- Instrumentation is the OTel javaagent `2.31.1` via `-javaagent` with `OTEL_SERVICE_NAME` set per service. Do not add `opentelemetry-spring-boot-starter` as a dependency — it instruments neither gRPC nor AWS SDK v2 SQS/SNS, so both interesting hops go dark.
+- Enable `otel.instrumentation.aws-sdk.experimental-use-propagator-for-messaging=true` and `otel.instrumentation.messaging.experimental.receive-telemetry.enabled=true`; SQS context propagation is off by default.
+- Keep total SQS message attributes at **≤8**. AWS caps at 10 and trace-context injection is skipped *silently* when full, which surfaces as an orphaned trace rather than an error.
+- The consumer side starts a **new trace joined by a span link**, not one continuous trace across the queue hop. That is correct OpenTelemetry behaviour — do not "fix" it by manually threading a `traceparent` through the message body.

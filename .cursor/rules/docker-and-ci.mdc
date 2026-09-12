@@ -1,0 +1,54 @@
+---
+description: Local docker-compose stack (Postgres 17, Redis 7, LocalStack, Mosquitto 2, Jaeger), multi-stage JVM Dockerfiles with the OTel javaagent, GitHub Actions CI/CD and the k3d Helm chart for CyberSixSeven
+globs: docker-compose.yml,**/Dockerfile,.github/workflows/**,infra/k8s/**
+alwaysApply: false
+---
+
+## The local stack is a closed list
+
+- Exactly these services: `postgres:17`, `redis:7`, `localstack/localstack`, `eclipse-mosquitto:2`, `jaegertracing/all-in-one`. Anything else gets raised first, per `06-cursor-guardrails.md` §2.
+- **Never add `amazon/dynamodb-local`.** LocalStack's free tier already covers DynamoDB, and running both means two endpoint URLs, two credential paths and two places a table can fail to exist — the resulting `ResourceNotFoundException` looks like a code bug and is a config bug.
+- LocalStack does not emulate IoT Core on the free tier, so MQTT is Mosquitto locally and real IoT Core deployed. Do not "fix" this by adding an IoT service to LocalStack.
+- Ports come from the fixed map in `06-cursor-guardrails.md` §5. Do not invent or remap one — three Spring Boot services all default to 8080 and the second to start dies on a bind conflict.
+- No `version:` key at the top of `docker-compose.yml`; Compose v2 reports it obsolete on every command.
+- Pin `jaegertracing/all-in-one` to an explicit tag, never `latest`, and expose 16686 (UI) and 4317 (OTLP gRPC).
+
+## LocalStack
+
+- Every container that touches AWS — and LocalStack itself — gets `AWS_ACCESS_KEY_ID=test`, `AWS_SECRET_ACCESS_KEY=test`, `AWS_REGION=us-east-1`. Without them the SDK aborts at startup with "Unable to load credentials" on any machine with no AWS profile. That is not a code defect and must not be chased in application code.
+- Queues, topics, buckets and tables are created by an **init script** mounted into `/etc/localstack/init/ready.d/` (executable bit set, `awslocal`, written to be re-runnable). Never create one with `docker compose exec`, and never leave a manual step in a README: `docker compose down -v` followed by `up` has to restore the whole environment unattended.
+- That script owns: the `device-commands` queue + its DLQ, the `model-gen-jobs` queue + its DLQ, the `submission-events` topic with both subscriptions set to `RawMessageDelivery=true`, the `device_events` DynamoDB table, and the `cybersixseven-accessories` bucket. It is the local mirror of the Terraform resource set — when one changes, change both.
+
+## Postgres and Mosquitto
+
+- Postgres needs `healthcheck: pg_isready -U cybersixseven`, and every dependent service declares `depends_on: { postgres: { condition: service_healthy } }`. Plain `depends_on` waits only for the container to exist, so the app starts first and HikariPool fails on a database that is still initializing.
+- Mosquitto 2 denies by default: `allow_anonymous false` and a listener bound to localhost inside the container. Mount an explicit `mosquitto.conf` with `listener 8883`, `require_certificate true` and the CA/server cert paths, or nothing outside the container can connect — and the symptom is a bare timeout, not a rejection.
+- Mount dev certs read-only and keep the generated CA/keys out of git.
+
+## Dockerfiles — JVM services and model-gen-service only
+
+- **`student-web` and `admin-web` deploy to Vercel and get no Dockerfile, no compose service and no CI image build.** If a task appears to require one, stop and ask.
+- Always multi-stage: a JDK 21 build stage running `./mvnw -B -DskipTests package` (the committed wrapper, never a system `mvn`), and an `eclipse-temurin:21-jre` runtime stage that copies only the jar. No JDK, no `~/.m2`, no sources in the final image.
+- The **build context is the repo root**, not the service directory. `services/contracts` must be built and installed before either gRPC-speaking service compiles — a Dockerfile that copies only `services/platform-api` fails on a missing `com.cybersixseven:contracts`, and the error names protobuf classes rather than the real cause.
+- Copy the POMs and resolve dependencies in their own layer before copying source, otherwise every one-line change re-downloads Maven Central.
+- Fetch the **OpenTelemetry javaagent 2.31.1** in the build stage from a pinned URL with a checksum and `COPY` it into the runtime image; reference it as `-javaagent:/opt/otel/opentelemetry-javaagent.jar`. Never download it at container start — that makes the image unreproducible and the service unstartable without egress. 2.31.0 shipped a broken classpath; do not "round down".
+- **Set `OTEL_SERVICE_NAME` per image** (`platform-api`, `device-command-service`, `reward-service`, `model-gen-service`). Without it every service renders as `unknown_service:java` in Jaeger, which makes the trace view useless in exactly the demo it exists for.
+- Also set `otel.instrumentation.aws-sdk.experimental-use-propagator-for-messaging=true` and `otel.instrumentation.messaging.experimental.receive-telemetry.enabled=true`, and point `OTEL_EXPORTER_OTLP_ENDPOINT` at Jaeger's 4317. Do not add `opentelemetry-spring-boot-starter` instead — it instruments neither gRPC nor AWS SDK v2 SQS/SNS, i.e. neither interesting hop.
+- `model-gen-service`'s image is Python 3.13 and is instrumented with `opentelemetry-instrument`, not the Java agent.
+- Run as a non-root user. Add a `.dockerignore` covering `target/`, `node_modules/`, `.git`, `.venv`, `out/`. Never `COPY` a `.env`, `secrets.h` or cert/key file into an image.
+
+## CI
+
+- Order is: test → build and push images to ECR → `terraform plan` on PR → `terraform apply` + ECS deploy on merge to `main`. Never run `apply` from a pull-request trigger.
+- AWS auth is GitHub OIDC role assumption via `aws-actions/configure-aws-credentials`. No long-lived access keys in repository secrets.
+- Pin every action to a tag, and pin toolchains explicitly: Java 21, Node 24, pnpm 11.26.0, Python 3.13.
+- Testcontainers starts its own containers. Do not declare `services:` containers or a compose step for Postgres/Redis in the workflow, and do not hardcode a port — the two mechanisms fight and the failure reads as a connection refused.
+- Build `services/contracts` first, then `./mvnw -B verify` per module; `pnpm -w build && pnpm -w lint`; `pytest -q`. Cache `~/.m2` and the pnpm store keyed on the lockfiles.
+- Never add `continue-on-error`, `-DskipTests` or `|| true` to a test step to get a green run. A red pipeline is the output; report it rather than editing around it.
+
+## infra/k8s (k3d only)
+
+- The Helm chart deploys `platform-api` and `device-command-service` to k3d against local dependencies. It is not a second deployment target for the whole stack, and it never includes the frontends.
+- Probes hit `/actuator/health/liveness` and `/actuator/health/readiness`, not `/actuator/health` — a single aggregate endpoint restarts the pod whenever a downstream dependency is briefly down.
+- Set requests and limits, and pair the memory limit with `-XX:MaxRAMPercentage`. A JVM that cannot see the cgroup limit sizes its heap from the node and is OOMKilled with no stack trace.
+- Load images with `k3d image import` and `imagePullPolicy: IfNotPresent`. Do not point the local cluster at ECR.

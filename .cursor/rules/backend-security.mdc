@@ -1,0 +1,43 @@
+---
+description: Spring Security filter-chain layout, JWT issuing/validation, Google OAuth2 success handling, Argon2 hashing, refresh cookies, CORS/CSRF and rate limiting for platform-api
+globs: services/platform-api/**
+alwaysApply: false
+---
+
+## Filter chains
+
+- The chain layout is fixed and grows in one direction: v0.4 ships two — `@Order(1)` `securityMatcher("/internal/**")` (API-key filter, CSRF off) and a last-ordered catch-all that is `permitAll()` for now. v0.5 inserts `securityMatcher("/oauth2/**", "/login/oauth2/**")` (session-based Google login) and `securityMatcher("/api/**")` (JWT resource server, stateless) above it. Do not create an OAuth chain before v0.5 and do not collapse these into one chain.
+- Every `SecurityFilterChain` bean carries an explicit `@Order`, and every chain except the single lowest-ordered catch-all carries an explicit `securityMatcher`. A matcher-less chain matches every request and swallows the chains ordered after it; the symptom is a 401 on an endpoint you never intended to secure.
+- `SessionCreationPolicy.STATELESS` goes on the `/api/**` chain only. Never on the OAuth2 chain: the authorization-code `state` value and the `OAuth2AuthorizationRequest` are stored in the HTTP session, and stateless turns every Google login into `[authorization_request_not_found]`.
+- The `X-Internal-Api-Key` filter is registered inside the `@Order(1)` chain with `.addFilterBefore(...)`. Do not annotate it `@Component` — Boot auto-registers any `OncePerRequestFilter` bean against *every* request in the servlet container, so the check would also run on `/api/**` and reject normal traffic.
+- Compare the internal key with `MessageDigest.isEqual` on UTF-8 bytes; `String.equals`/`==` leaks length and prefix through timing.
+
+## Tokens
+
+- Access tokens are issued and validated with `spring-boot-starter-oauth2-resource-server`: `NimbusJwtEncoder`/`NimbusJwtDecoder` over a symmetric HS256 `SecretKeySpec`, plus `oauth2ResourceServer(oauth2 -> oauth2.jwt(...))`. Do **not** add `io.jsonwebtoken:jjwt-*` or `com.auth0:java-jwt` — Spring already ships this, and jjwt's 0.11 and 0.12 APIs differ breakingly, so snippets from the two lines do not compile together.
+- The HS256 key must be **≥32 bytes** of raw key material; Nimbus throws "The secret length must be at least 256 bits" at bean-creation time. Read it from config (e.g. `app.jwt.secret`) — never a literal, never a short dev string padded later.
+- Access token lifetime ~10 minutes, returned in the JSON response body. The refresh token is opaque, stored in Redis under a TTL, and set as `HttpOnly; Secure; SameSite=Lax; Path=/api/auth/refresh`. Rotate it on every `/api/auth/refresh` and delete the previous Redis entry in the same operation — a refresh token that still works after use is a replay hole.
+- Never `SameSite=None`: `app.<domain>` and `api.<domain>` share one registrable domain, so `Lax` is correct and works in Safari. Never write any token to `localStorage` or `sessionStorage`, and never return the refresh token in a response body.
+- The JWT carries a `role` claim of `STUDENT|TEACHER|ADMIN` with no prefix. Convert it with a `JwtGrantedAuthoritiesConverter` whose authorities-claim-name is `role` and authority-prefix is `ROLE_`; without that converter `hasRole('ADMIN')` never matches and every admin endpoint 403s regardless of who calls it.
+- `@PreAuthorize` does nothing unless `@EnableMethodSecurity` is present on a `@Configuration` class. The annotation compiles, the method runs unguarded, and the endpoint is silently open — add the annotation and prove it with a test that expects 403 for a student JWT.
+
+## Google OAuth2
+
+- The login success handler must be a custom `AuthenticationSuccessHandler` wired with `.successHandler(...)`. Spring's default `SavedRequestAwareAuthenticationSuccessHandler` redirects to `/` with a `JSESSIONID` and hands the SPA no token at all — the user lands back on the frontend logged out, with no error anywhere. The custom handler mints the access JWT, sets the refresh cookie, then 302s to `https://app.<domain>/auth/callback#<access_token>`.
+- Google login is a full-page browser navigation to `/oauth2/authorization/google` (an `<a href>`), never an XHR/`fetch` — an XHR against the authorization endpoint fails CORS and dies with no usable error.
+
+## Passwords
+
+- Hash with `Argon2PasswordEncoder.defaultsForSpringSecurity_v5_8()`. The no-arg constructor is deprecated and uses weaker parameters; BCrypt is explicitly not the choice here. This requires `org.bouncycastle:bcprov-jdk18on:1.86` on the classpath or it fails at runtime with `NoClassDefFoundError`.
+- `users.password_hash` is nullable because Google-only accounts have none. Never log a hash, never map it into a DTO, and never return it from any endpoint — including admin user listings.
+
+## CORS, CSRF, rate limiting
+
+- CORS allows an exact, profile-scoped origin list — `https://app.<domain>`, `https://admin.<domain>`, `http://localhost:3000`, `http://localhost:3001` — with `allowCredentials = true`. Never `*` or `allowedOriginPatterns("*")`: a wildcard alongside `Access-Control-Allow-Credentials: true` is rejected by the browser, which is the classic "works in curl, fails in the app" bug.
+- Until v0.7, CSRF is explicitly `.csrf(csrf -> csrf.disable())` on the API chain with the `// TODO v0.7` comment. At v0.7 replace it with `CookieCsrfTokenRepository.withHttpOnlyFalse()` double-submit. Never leave Spring Security's default CSRF on for a SPA without that repository (every POST 403s), and never `permitAll()` an endpoint to make a CSRF 403 disappear.
+- Rate limit `/api/auth/**` and `/api/submissions` with the bucket4j starter `0.14.0`, set `server.forward-headers-strategy: framework`, and key buckets on the resolved client IP. Behind the ALB, keying on the socket address buckets every user as one and a single attacker 429s the whole site. The starter is built against Boot 4.0.3; if it misbehaves on 4.1.1, hand-roll a `OncePerRequestFilter` over `bucket4j-core` and say so in a comment.
+
+## Trust boundaries
+
+- Scores are computed server-side in `SubmissionService.score()` against the stored `correct_answer`. Never accept a `score` from the request body, never take `studentId` from the payload (read it from the JWT subject), and never take `role` from anything but the database row.
+- `GET /api/questions` must not serialize `correct_answer` in any shape. Assert it against raw JSON — `jq -e 'all(.[]; has("correctAnswer") | not)'` — not by reading the Java type; one forgotten mapping on one code path is invisible in review.

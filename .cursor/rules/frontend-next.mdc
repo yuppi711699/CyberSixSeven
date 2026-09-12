@@ -1,0 +1,48 @@
+---
+description: Next.js 16 App Router, React 19, TanStack Query v5 and monorepo package-export rules for CyberSixSeven's student-web and admin-web
+globs: apps/**,packages/**
+alwaysApply: false
+---
+
+## Pinned versions — never substitute, never bump, never write `latest` or a caret range you invented
+
+- Next 16.3.5 · React 19.3.0 · TypeScript 7.0.2 · Turborepo 2.10.12 · TanStack Query 5.102.8 · ESLint 10.10.0 · Prettier 3.9.6.
+- pnpm **11.26.0** in both `.npmrc` and `package.json` `packageManager`. Never pnpm 12 — it is a ground-up Rust rewrite that removed 18 install flags without listing them as breaking changes.
+- Never run `npm install` or `yarn` in this repo. A stray `package-lock.json` desyncs the workspace links and the failure shows up as a missing internal package, not as a lockfile error.
+- Node floor is **22.12** (use 24). The floor comes from Vitest 5, not Next — Next 16 only needs 20.9, so do not relax `engines` to 20.x on Next's say-so; Vitest will refuse to start.
+- TypeScript 7.0.2 is the Go-native compiler rewrite. If `typescript-eslint` or another tool breaks against it, fall back to the TS 5.x line and leave a comment saying why. Do not turn off `strict`, and do not paper over TS 7 diagnostics with `// @ts-expect-error` or `any`.
+- Root `lint` runs `eslint` directly, not `next lint`, so `packages/*` (which live outside any Next app) are actually linted. ESLint 10 reads flat config only — config goes in `eslint.config.*`; an `.eslintrc.json` is not loaded, so lint would pass while enforcing nothing.
+
+## Workspace packages: raw TypeScript, no build step
+
+- `packages/ui`, `packages/api-client` and `packages/auth-client` publish raw `.ts`/`.tsx` through the `exports` field (`"exports": { ".": "./src/index.ts" }`). No `build` script, no `dist/`, no tsup/tsc emit.
+- Every one of them must be listed in `transpilePackages` in **both** `apps/student-web/next.config.ts` and `apps/admin-web/next.config.ts`. A missing entry works fine under `pnpm dev` and fails only at `next build` — so after touching package wiring, run `pnpm -w build`, not `pnpm dev`, before reporting done.
+- Do not add a `main`/`module`/`types` field pointing at `dist/`. It wins over `exports` in some resolvers and you ship stale code that typechecks.
+- Do not add a stub `build` script to a package to make the turbo graph "look complete". The moment it emits `dist/` you are back to two artifacts and a cache that lies.
+- `turbo.json` owns `build`, `dev`, `lint`, `test`. Do not introduce a second root runner (a vitest workspace runner, a root `concurrently`, npm-run-all) that invokes the same work — CI and local then disagree about which config applied.
+
+## App Router: everything is client-side, and that is deliberate
+
+- The access token lives in memory in a React context. A Server Component, a route handler and `middleware.ts` **cannot read it**, so all data fetching is `'use client'` + TanStack Query. Do not "fix" a 401 by moving a fetch into a Server Component or adding `export const dynamic = 'force-dynamic'` — it is unfixable there.
+- Do not write a `middleware.ts` auth gate. Middleware runs on `app.<domain>`; the refresh cookie is host-scoped to `api.<domain>` with `Path=/api/auth/refresh`, so middleware sees no auth state at all and would redirect every request to login. Route guards are client-side redirects.
+- No Next.js API routes as a backend, and no route handler proxying `platform-api`. All logic lives in `platform-api`; a proxy hop cannot see the in-memory token anyway.
+- Do not reach for Server Actions or `useActionState` for the question form. Submission goes through `submitAnswersMutationOptions()` so both apps share one typed path and the request carries the in-memory bearer token — a Server Action cannot.
+- `params` and `searchParams` are Promises in the App Router: `await` them in a server page/layout, or `React.use()` them in a client component. Destructuring them directly is a Next 14 habit that now throws.
+- App Router only. No `pages/` directory, not even for one route.
+
+## TanStack Query v5
+
+- Mutations have **no `isLoading`** in v5 — `isPending` is the only correct flag. Reading `isLoading` off a mutation result yields `undefined`, so the submit button never disables and the student double-submits.
+- Queries are the opposite case: a query with `enabled: false` has `isPending === true` forever because nothing has been fetched. Use `isLoading` (`isPending && isFetching`) for anything that can be disabled, or a disabled query renders a spinner that never resolves.
+- All query/mutation option objects are `queryOptions()` / `mutationOptions()` factories in `packages/api-client` (`questionsQueryOptions()`, `submitAnswersMutationOptions()`), so `student-web` and `admin-web` share one key and one fetcher. Do not inline `queryKey`/`queryFn` in a component.
+- Polling for `accessoryUrl` must terminate. `refetchInterval: (query) => query.state.data?.accessoryUrl ? false : 2000` — note the v5 callback takes the **query**, not `(data, query)` — plus a hard stop around 60s that swaps to a "taking longer than expected" state with a manual retry. `model-gen-service` normally takes 5–10s; an unbounded poll is a real bug, not cosmetic.
+- Never drive polling with `setInterval` next to a query. Two schedulers, one cache, and no way to stop cleanly.
+- Create the `QueryClient` inside a `'use client'` provider via `useState(() => new QueryClient())`. A module-scope singleton is shared across SSR requests on the server and leaks one user's cache into another's first paint.
+- Do not add `persistQueryClient` or any localStorage/IndexedDB persister. The cache holds authenticated responses and, if the token ever lands in it, the token too.
+
+## Scope
+
+- Do not add a UI framework or component library (MUI, Chakra, shadcn/ui, Tailwind plugins that ship components). `packages/ui` is the hand-written design system — Button, Input, Card, Table, Modal, Toast — and both apps import shared visuals from it exclusively, with no component copy-pasted between apps.
+- Do not add Storybook. Explicitly out of scope.
+- Do not add Dockerfiles for `apps/*`. The frontends deploy to Vercel; only the backend services are containerized.
+- API base URL comes from env (`.env.example` committed, real values only in Vercel project settings). No hardcoded `localhost:8080` and no environment switch on `process.env.NODE_ENV`.

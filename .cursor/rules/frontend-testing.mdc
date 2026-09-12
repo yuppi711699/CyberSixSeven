@@ -1,0 +1,39 @@
+---
+description: Vitest 5, React Testing Library 16, Playwright 1.63 E2E and axe accessibility rules for CyberSixSeven frontend tests
+globs: **/*.test.ts,**/*.test.tsx,**/*.spec.ts,**/*.spec.tsx,e2e/**,**/vitest.config.*,**/vitest.setup.*,**/playwright.config.*
+alwaysApply: false
+---
+
+## Runners — pinned, and one each
+
+- Vitest **5.0.0**, `@testing-library/react` **16.3.3**, jsdom, Playwright **1.63.0**, `@axe-core/playwright` **4.13.0**. Do not substitute.
+- Vitest 5 requires Node **≥22.12**. That is why the repo's Node floor is 22.12 (use 24) rather than Next's 20.9.
+- No Jest, and specifically no `next/jest`: it only works inside a Next app, so `packages/ui` and `packages/api-client` would need a second, different config strategy.
+- One Vitest config shape per package, all wired into turbo's existing `test` task. `pnpm test` must go through `turbo run test` so CI and local share one cache key — do not add a competing root runner or a root vitest workspace that re-runs the same suites.
+- Keep Playwright specs in `e2e/**` and exclude that path from every Vitest `include`. Otherwise Vitest picks up `*.spec.ts` E2E files and fails on `test.describe` not existing, which reads as a broken config rather than a misrouted file.
+
+## Vitest / RTL specifics
+
+- `clearMocks` defaults to **on** in Vitest 5. If a ported test only passes because a mock kept its implementation between tests, fix the test — do not set `clearMocks: false`.
+- RTL 16 lists `@testing-library/dom` as a peer dependency: install it explicitly. Do not pull RTL 14.x from an older example; it does not support React 19.
+- Build a fresh `QueryClient` per test with `retry: false` and no cache reuse. A retrying query turns an error-path assertion into a 3× timeout that fails as a flake, and a shared client leaks state between tests in whatever order they happen to run.
+- Required unit coverage: question-form validation (numeric + required), the auth-context refresh-on-401 path, and three `packages/ui` components.
+- The refresh test must fire **two concurrent 401s and assert exactly one `POST /api/auth/refresh`**. Single-flight refresh is correct-looking under sequential tests; concurrency is the only thing that catches it.
+- Test that path by stubbing `fetch`, not by mocking `packages/api-client`. The fetch wrapper in `api-client` *is* the code under test — mocking it asserts nothing.
+- Assert both TanStack Query flag traps directly, because a type error will not catch them: a mutation test asserting the submit button is disabled while `isPending`, and a disabled-query test asserting no spinner renders while `isPending` is true but `isLoading` is false.
+
+## Playwright
+
+- **E2E only. No component testing.** It was rewritten in 1.62 and the old `@playwright/experimental-ct-*` packages are abandoned yet still install cleanly, which is what makes the trap easy. If you are reaching for one, the test belongs in Vitest + RTL.
+- `pnpm exec playwright install --with-deps` is a required step. The npm package ships no browsers, and CI otherwise fails with "Executable doesn't exist" long after install appeared to succeed.
+- Four specs: student happy path (login → answer → accessory unlock), admin happy path (login → create a question → verify it appears in `student-web`), and two auth failure paths.
+- E2E runs against the real `platform-api` + LocalStack with the seeded `TEACHER`/`ADMIN` users from backend v0.5. Do not stub or intercept the API in E2E — a mocked E2E proves nothing the unit tests do not, and the cross-app admin→student spec only means anything against one real database.
+- Never `waitForTimeout` on the accessory unlock. `model-gen-service` takes 5–10s and varies; wait on the polled UI state, e.g. `await expect(page.getByRole('link', { name: /download stl/i })).toBeVisible({ timeout: 90_000 })`.
+- Prefer role/label locators over CSS or test IDs — the same queries then double as evidence that the accessible name exists for the axe pass.
+- Log in through the UI in the auth specs. Seeding a token into the page cannot work: the access token lives only in a React context and the refresh cookie is set by `api.<domain>`, not by the test.
+
+## Accessibility
+
+- Assert **zero critical and serious** axe violations on the student question page, the results page, and the admin question bank. Filter by `impact` — asserting `violations.length === 0` makes moderate/minor noise permanently red and someone will eventually delete the check instead of fixing it.
+- Run axe only once the page has reached steady state (post-login, after polling resolves). Scanning a loading skeleton passes trivially and proves nothing.
+- Axe is a floor, not the requirement. The stated acceptance criterion is that the whole student flow is completable **keyboard-only**, which axe cannot verify — keep the manual keyboard pass, and add ARIA labels plus visible focus styles wherever it finds gaps.
