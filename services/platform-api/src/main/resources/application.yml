@@ -5,11 +5,20 @@ spring:
   application:
     name: platform-api
   datasource:
-    url: jdbc:postgresql://localhost:5432/cybersixseven
-    username: cybersixseven
-    password: localdev
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/cybersixseven}
+    username: ${DB_USERNAME:cybersixseven}
+    password: ${DB_PASSWORD}
   jpa:
     hibernate:
-      # Schema is owned by Flyway from v0.2 onward. Never 'update'.
       ddl-auto: none
     open-in-view: false
+
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: false
+  endpoints:
+    web:
+      exposure:
+        include: health

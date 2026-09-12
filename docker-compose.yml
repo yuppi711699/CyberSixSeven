@@ -7,7 +7,7 @@ services:
     environment:
       POSTGRES_DB: cybersixseven
       POSTGRES_USER: cybersixseven
-      POSTGRES_PASSWORD: localdev
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the environment}
     ports:
       - "5432:5432"
     volumes:
