@@ -8,7 +8,7 @@ documents/
 *.pem
 *.key
 *.crt
-firmware/esp32/secrets.h
+secrets.h
 
 # JVM / Maven
 target/

@@ -5,7 +5,7 @@
 *.pem
 *.key
 *.crt
-firmware/esp32/secrets.h
+secrets.h
 
 # Generated protobuf stubs — thousands of lines of builder boilerplate.
 # Without this, Cursor retrieves generated code instead of yours.

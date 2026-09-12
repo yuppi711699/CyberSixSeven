@@ -1,0 +1,15 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: platform-api
+  datasource:
+    url: jdbc:postgresql://localhost:5432/cybersixseven
+    username: cybersixseven
+    password: localdev
+  jpa:
+    hibernate:
+      # Schema is owned by Flyway from v0.2 onward. Never 'update'.
+      ddl-auto: none
+    open-in-view: false

@@ -1,0 +1,26 @@
+# Local development stack for CyberSixSeven.
+# v0.1: Postgres only. Redis, LocalStack, Mosquitto and Jaeger arrive in later versions.
+services:
+  postgres:
+    image: postgres:17
+    container_name: cybersixseven-postgres
+    environment:
+      POSTGRES_DB: cybersixseven
+      POSTGRES_USER: cybersixseven
+      POSTGRES_PASSWORD: localdev
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cybersixseven"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+# Named volume: without it postgres:17's declared VOLUME lands in an anonymous
+# volume that is silently discarded on recreate. Harmless at v0.1; from v0.2
+# onward, when Flyway owns the schema, it reads as a migration bug.
+volumes:
+  postgres-data:
