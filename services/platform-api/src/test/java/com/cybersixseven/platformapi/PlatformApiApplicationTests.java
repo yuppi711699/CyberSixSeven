@@ -15,7 +15,7 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.ApplicationContext;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class PlatformApiApplicationTests {
+class PlatformApiApplicationTests extends PostgresIntegrationTest {
 
     @LocalServerPort
     private int port;
