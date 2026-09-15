@@ -25,3 +25,9 @@ management:
     web:
       exposure:
         include: health
+
+# Exact origins only — never "*". Credentials stay on for later cookie/auth flows.
+# Comma-separated for @Value String[] binding.
+app:
+  cors:
+    allowed-origins: http://localhost:3000,http://localhost:3001
