@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package cybersixseven.device;
+
+option java_multiple_files = true;
+option java_package = "com.cybersixseven.contracts.device";
+option java_outer_classname = "DeviceCommandProto";
+
+// Product gRPC SendCommand is unused until admin resend in v0.6.
+// Descriptor + stubs are compiled and tested from v0.3.
+service DeviceCommand {
+  rpc SendCommand(DeviceCommandRequest) returns (DeviceCommandResponse);
+}
+
+message DeviceCommandRequest {
+  string command_id = 1;
+  string submission_id = 2;
+  string device_id = 3;
+  string event = 4;
+  int32 intensity = 5;
+}
+
+message DeviceCommandResponse {
+  string command_id = 1;
+  bool accepted = 2;
+  string message = 3;
+}

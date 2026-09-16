@@ -1,0 +1,19 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: device-command-service
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+# gRPC product RPC is compiled from contracts; first product use is admin resend in v0.6.
+spring.grpc.server.port: 9090

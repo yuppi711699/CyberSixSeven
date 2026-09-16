@@ -18,7 +18,9 @@
   <name>CyberSixSeven services</name>
 
   <modules>
+    <module>contracts</module>
     <module>platform-api</module>
+    <module>device-command-service</module>
   </modules>
 
   <properties>

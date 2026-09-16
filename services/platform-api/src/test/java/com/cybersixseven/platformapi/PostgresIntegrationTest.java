@@ -1,6 +1,7 @@
 package com.cybersixseven.platformapi;
 
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.test.context.TestPropertySource;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
@@ -10,6 +11,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
  * while Spring keeps a cached context whose Hikari pool still points at the dead port. The next
  * class then fails with "connection has been closed" / missing tables.
  */
+@TestPropertySource(properties = "app.cors.allowed-origins=http://localhost:3000")
 abstract class PostgresIntegrationTest {
 
     @ServiceConnection

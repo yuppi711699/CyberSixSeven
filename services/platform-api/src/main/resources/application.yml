@@ -27,7 +27,7 @@ management:
         include: health
 
 # Exact origins only — never "*". Credentials stay on for later cookie/auth flows.
-# Comma-separated for @Value String[] binding.
+# Comma-separated for @Value String[] binding. Required — set in repo-root .env (see .env.example).
 app:
   cors:
-    allowed-origins: http://localhost:3000,http://localhost:3001
+    allowed-origins: ${CORS_ALLOWED_ORIGINS}
