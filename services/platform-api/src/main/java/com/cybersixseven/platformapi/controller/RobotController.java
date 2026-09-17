@@ -42,9 +42,9 @@ public class RobotController {
         return robotService.get(id);
     }
 
-    @PostMapping("")
-    @ResponseStatus (HttpStatus.CREATED)
-    public RobotResponse createRobot(@PathVariable UUID id, @RequestBody CreateRobotRequest request){
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    public RobotResponse createRobot(@RequestBody CreateRobotRequest request) {
         return robotService.create(request);
     }
 
