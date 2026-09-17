@@ -21,8 +21,10 @@ MQTT, ArduinoJson, or PubSubClient here.
 | Upload | **require an explicit USB serial port** (e.g. `/dev/cu.usbserial-*`). Do not let PlatformIO auto-pick Bluetooth headsets such as `/dev/cu.BeatsFlex`. |
 
 ```bash
+## XXXX=0001
 pio run -t upload --upload-port /dev/cu.usbserial-XXXX
-pio device monitor --port /dev/cu.usbserial-XXXX -b 115200
+# pio device monitor --port /dev/cu.usbserial-XXXX -b 115200
+pio device monitor --port /dev/cu.usbserial-0001 -b 115200 --dtr 0 --rts 0
 ```
 
 ## Setup
