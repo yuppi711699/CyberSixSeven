@@ -1,0 +1,15 @@
+app:
+  fixtures:
+    enabled: true
+  internal-api-key: test-internal-api-key
+  devices:
+    demo-device-id: esp32-dev-001
+  aws:
+    region: us-east-1
+    endpoint: http://127.0.0.1:1
+    sns-topic-arn: arn:aws:sns:us-east-1:000000000000:submission-events
+
+spring:
+  task:
+    scheduling:
+      enabled: false

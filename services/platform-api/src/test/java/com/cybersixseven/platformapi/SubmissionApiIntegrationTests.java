@@ -6,8 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.cybersixseven.platformapi.entity.OutboxEvent;
 import com.cybersixseven.platformapi.entity.ScoredAnswerSnapshot;
 import com.cybersixseven.platformapi.entity.Submission;
+import com.cybersixseven.platformapi.repository.OutboxEventRepository;
 import com.cybersixseven.platformapi.repository.SubmissionRepository;
 import java.io.IOException;
 import java.net.URI;
@@ -45,6 +47,7 @@ class SubmissionApiIntegrationTests extends PostgresIntegrationTest {
     private int port;
 
     private final SubmissionRepository submissionRepository;
+    private final OutboxEventRepository outboxEventRepository;
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
@@ -52,9 +55,11 @@ class SubmissionApiIntegrationTests extends PostgresIntegrationTest {
     @Autowired
     SubmissionApiIntegrationTests(
             SubmissionRepository submissionRepository,
+            OutboxEventRepository outboxEventRepository,
             JdbcTemplate jdbcTemplate,
             ObjectMapper objectMapper) {
         this.submissionRepository = submissionRepository;
+        this.outboxEventRepository = outboxEventRepository;
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.httpClient = HttpClient.newHttpClient();
@@ -62,6 +67,7 @@ class SubmissionApiIntegrationTests extends PostgresIntegrationTest {
 
     @BeforeEach
     void resetDatabase() {
+        outboxEventRepository.deleteAll();
         submissionRepository.deleteAll();
         jdbcTemplate.update(
                 "UPDATE questions SET prompt = ?, correct_answer = ? WHERE id = ?::uuid",
@@ -107,6 +113,13 @@ class SubmissionApiIntegrationTests extends PostgresIntegrationTest {
         assertNull(stored.getStudentId());
         assertArrayEquals(expectedHash, stored.getSubmissionSecretHash());
         assertEquals(2, stored.getScore());
+
+        List<OutboxEvent> outbox = outboxEventRepository.findAll();
+        assertEquals(1, outbox.size());
+        assertEquals(stored.getId(), outbox.get(0).getPayload().submissionId());
+        assertEquals(outbox.get(0).getId(), outbox.get(0).getPayload().commandId());
+        assertEquals("esp32-dev-001", outbox.get(0).getPayload().deviceId());
+        assertEquals(3, outbox.get(0).getPayload().intensity());
     }
 
     @Test
@@ -145,6 +158,7 @@ class SubmissionApiIntegrationTests extends PostgresIntegrationTest {
             assertEquals(400, post(request).statusCode());
         }
         assertEquals(0, submissionRepository.count());
+        assertEquals(0, outboxEventRepository.count());
     }
 
     @Test

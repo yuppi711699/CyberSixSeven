@@ -17,3 +17,26 @@ management:
 
 # gRPC product RPC is compiled from contracts; first product use is admin resend in v0.6.
 spring.grpc.server.port: 9090
+
+app:
+  aws:
+    region: ${AWS_REGION:us-east-1}
+    endpoint: ${AWS_ENDPOINT:}
+    access-key: ${AWS_ACCESS_KEY_ID:test}
+    secret-key: ${AWS_SECRET_ACCESS_KEY:test}
+    device-commands-queue-url: ${DEVICE_COMMANDS_QUEUE_URL:}
+    device-events-table: device_events
+  mqtt:
+    enabled: ${MQTT_ENABLED:true}
+    broker-url: ${MQTT_BROKER_URL:}
+    client-id: ${MQTT_CLIENT_ID:device-command-service}
+    ca-cert-path: ${MQTT_CA_CERT_PATH:}
+    client-cert-path: ${MQTT_CLIENT_CERT_PATH:}
+    client-key-path: ${MQTT_CLIENT_KEY_PATH:}
+    connect-timeout-seconds: 10
+    completion-timeout-seconds: 10
+  platform-api:
+    base-url: ${PLATFORM_API_BASE_URL:http://localhost:8080}
+    internal-api-key: ${INTERNAL_API_KEY:}
+    connect-timeout-ms: 2000
+    read-timeout-ms: 5000

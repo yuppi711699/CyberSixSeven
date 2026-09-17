@@ -33,6 +33,9 @@ public class Submission {
     @Column(name = "submission_secret_hash", nullable = false)
     private byte[] submissionSecretHash;
 
+    @Column(name = "accessory_key")
+    private String accessoryKey;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -76,6 +79,14 @@ public class Submission {
 
     public byte[] getSubmissionSecretHash() {
         return submissionSecretHash.clone();
+    }
+
+    public String getAccessoryKey() {
+        return accessoryKey;
+    }
+
+    public void setAccessoryKey(String accessoryKey) {
+        this.accessoryKey = accessoryKey;
     }
 
     public Instant getCreatedAt() {

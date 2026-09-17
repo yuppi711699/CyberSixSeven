@@ -112,3 +112,18 @@
   gap: 0.75rem;
   align-items: flex-start;
 }
+
+.accessory {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  align-items: flex-start;
+  width: 100%;
+  margin-top: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--c67-border);
+}
+
+.preview {
+  color: var(--c67-accent, #4de1c1);
+}

@@ -1,6 +1,11 @@
 import { getApiBaseUrl } from './config';
 import { normalizeApiError, normalizeNetworkError } from './errors';
-import type { CreateSubmissionRequest, CreateSubmissionResponse, Question } from './types';
+import type {
+  CreateSubmissionRequest,
+  CreateSubmissionResponse,
+  Question,
+  SubmissionDetail,
+} from './types';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
@@ -35,5 +40,15 @@ export function createSubmission(
   return request<CreateSubmissionResponse>('/api/submissions', {
     method: 'POST',
     body: JSON.stringify(body),
+  });
+}
+
+export const SUBMISSION_SECRET_HEADER = 'X-Submission-Secret';
+
+export function fetchSubmission(id: string, secret: string): Promise<SubmissionDetail> {
+  return request<SubmissionDetail>(`/api/submissions/${id}`, {
+    headers: {
+      [SUBMISSION_SECRET_HEADER]: secret,
+    },
   });
 }

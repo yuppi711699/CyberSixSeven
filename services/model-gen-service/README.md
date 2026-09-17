@@ -1,10 +1,10 @@
 # model-gen-service
 
-Python service whose only job is generating `.stl` files.
+Python service whose only job is generating `.stl` files, uploading them to a
+private bucket, and telling `platform-api` the deterministic object key.
 
-**v0.1 scope:** a FastAPI app with `GET /health`, plus a standalone script that
-proves the CAD toolchain works. No SQS consumer, no S3 upload, no
-OpenTelemetry — those arrive in v0.4 and v0.7.
+**v0.4 scope:** parametric accessory geometry, SQS consumer for `model-gen-jobs`,
+private S3 upload, authenticated internal PATCH. No OpenTelemetry yet (v0.7).
 
 ---
 
@@ -14,18 +14,7 @@ This is a hard constraint, not a preference.
 
 `build123d` pulls in `cadquery-ocp-novtk` transitively. That package is a
 binary wheel wrapping OpenCascade, it requires **Python ≥ 3.11**, and it
-publishes **no `cp310` wheel** — native arm64 wheels exist for cp311–cp314
-only. On Python 3.10 the install fails outright, *despite build123d's own
-metadata claiming 3.10 support*. The failure happens at `pip install` time, so
-you find out immediately, but the error points at OCP rather than at your
-Python version and is easy to misread.
-
-**3.13 is the target. 3.12 is fine. 3.11 works. 3.10 does not.**
-
-No conda, no mamba, no Docker workaround is needed — plain `pip` in a venv
-installs cleanly on Apple Silicon. The historical OpenCascade fragility is
-resolved; if you find yourself reaching for conda, you are solving a problem
-that no longer exists.
+publishes **no `cp310` wheel**.
 
 ## Setup
 
@@ -37,31 +26,34 @@ pip install -r requirements.txt
 
 ## Prove the CAD toolchain works
 
-Do this **before** writing any real modelling code. It builds a 10 mm cube and
-exports it, exercising build123d → cadquery-ocp-novtk → OpenCascade end to end:
-
 ```bash
 python scripts/test_generate.py && ls -la out/cube.stl
+pytest -q
 ```
 
-`out/` and `*.stl` are both gitignored — the artifact is disposable.
-
-## Run the API
+## Run
 
 ```bash
+# health (port 8000 is this service's fixed slot)
 uvicorn app.main:app --reload --port 8000
-curl -s localhost:8000/health    # expect {"status":"ok"}
+
+# consumer — separate process, never a FastAPI lifespan hook
+python -m app.consumer
 ```
 
-Port **8000** is this service's fixed slot in the project-wide port map. Do not
-vary it.
+The consumer long-polls `MODEL_GEN_QUEUE_URL`, writes
+`accessories/{submissionId}/reward.stl` to `cybersixseven-accessories`, then
+`PATCH /internal/submissions/{id}/accessory` with `X-Internal-Api-Key`.
+The SQS message is deleted only after that PATCH succeeds. Visibility timeout
+on `model-gen-jobs` is 300s; after 5 receives SQS redrives to `model-gen-jobs-dlq`.
 
 ## Layout
 
 ```
-app/main.py            FastAPI app — GET /health
-scripts/test_generate.py   CAD toolchain smoke test -> out/cube.stl
-requirements.txt       every dependency pinned with ==
+app/main.py        FastAPI — GET /health
+app/geometry.py    parametric accessory (pure)
+app/io.py          S3 HeadObject/PutObject + internal PATCH
+app/consumer.py    SQS poller (`python -m app.consumer`)
 ```
 
 ## Dependencies
@@ -73,6 +65,6 @@ Pinned exactly; do not float them.
 | build123d | 0.11.1 |
 | fastapi | 0.141.1 |
 | uvicorn | 0.42.0 |
-
-`cadquery-ocp-novtk` 7.9.3.1.1 is pulled in transitively by build123d and is
-not pinned here directly.
+| boto3 | 1.43.93 |
+| moto | 5.2.3 |
+| pytest | 9.0.2 |

@@ -23,6 +23,13 @@ public class SubmissionCapabilityGenerator {
         return new GeneratedCapability(plaintext, sha256(plaintext));
     }
 
+    public boolean matches(byte[] storedHash, String plaintext) {
+        if (storedHash == null || plaintext == null) {
+            return false;
+        }
+        return MessageDigest.isEqual(storedHash, sha256(plaintext));
+    }
+
     private byte[] sha256(String plaintext) {
         try {
             return MessageDigest.getInstance("SHA-256")

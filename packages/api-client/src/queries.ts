@@ -1,9 +1,16 @@
 import { mutationOptions, queryOptions } from '@tanstack/react-query';
-import { createSubmission, fetchQuestions } from './client';
+import { createSubmission, fetchQuestions, fetchSubmission } from './client';
 import type { CreateSubmissionRequest } from './types';
+
+export const ACCESSORY_POLL_INTERVAL_MS = 2000;
+export const ACCESSORY_POLL_TIMEOUT_MS = 60_000;
 
 export const questionKeys = {
   all: ['questions'] as const,
+};
+
+export const submissionKeys = {
+  detail: (id: string) => ['submissions', id] as const,
 };
 
 export function questionsQueryOptions() {
@@ -17,5 +24,13 @@ export function submitAnswersMutationOptions() {
   return mutationOptions({
     mutationKey: ['submissions', 'create'] as const,
     mutationFn: (request: CreateSubmissionRequest) => createSubmission(request),
+  });
+}
+
+export function submissionQueryOptions(id: string, secret: string) {
+  return queryOptions({
+    queryKey: submissionKeys.detail(id),
+    queryFn: () => fetchSubmission(id, secret),
+    enabled: Boolean(id) && Boolean(secret),
   });
 }

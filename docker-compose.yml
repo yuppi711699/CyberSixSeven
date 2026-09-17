@@ -1,5 +1,7 @@
 # Local development stack for CyberSixSeven.
-# v0.1: Postgres only. Redis, LocalStack, Mosquitto and Jaeger arrive in later versions.
+# v0.4: Postgres, LocalStack (SNS/SQS/DynamoDB/S3), Mosquitto mTLS.
+# Redis and Jaeger arrive in later versions. Pin LocalStack to 4.7 — 2026.03+
+# unified images require an auth token this repo does not store.
 services:
   postgres:
     image: postgres:17
@@ -18,6 +20,35 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  localstack:
+    image: localstack/localstack:4.7
+    container_name: cybersixseven-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_REGION: us-east-1
+      SERVICES: sns,sqs,dynamodb,s3
+    volumes:
+      - ./infra/local/localstack/init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: cybersixseven-mosquitto
+    ports:
+      - "8883:8883"
+    volumes:
+      - ./infra/local/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./infra/local/mosquitto/certs:/mosquitto/certs:ro
 
 # Named volume: without it postgres:17's declared VOLUME lands in an anonymous
 # volume that is silently discarded on recreate. Harmless at v0.1; from v0.2

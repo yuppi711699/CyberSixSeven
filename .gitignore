@@ -8,6 +8,8 @@ documents/
 *.pem
 *.key
 *.crt
+*.csr
+*.srl
 secrets.h
 
 # JVM / Maven

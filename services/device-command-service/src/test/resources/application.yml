@@ -1,0 +1,33 @@
+server:
+  port: 0
+
+spring:
+  task:
+    scheduling:
+      enabled: false
+  grpc:
+    server:
+      port: 0
+
+app:
+  aws:
+    region: us-east-1
+    endpoint: http://127.0.0.1:1
+    access-key: test
+    secret-key: test
+    device-commands-queue-url: http://127.0.0.1:1/000000000000/device-commands
+    device-events-table: device_events
+  mqtt:
+    enabled: false
+    broker-url: ""
+    client-id: device-command-service-test
+    ca-cert-path: /tmp/missing-ca.crt
+    client-cert-path: /tmp/missing-client.crt
+    client-key-path: /tmp/missing-client.key
+    connect-timeout-seconds: 2
+    completion-timeout-seconds: 2
+  platform-api:
+    base-url: http://127.0.0.1:1
+    internal-api-key: test-internal-api-key
+    connect-timeout-ms: 200
+    read-timeout-ms: 500

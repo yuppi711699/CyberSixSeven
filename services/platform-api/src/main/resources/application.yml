@@ -31,3 +31,18 @@ management:
 app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS}
+  fixtures:
+    enabled: ${APP_FIXTURES_ENABLED:false}
+  devices:
+    demo-device-id: ${APP_DEMO_DEVICE_ID:esp32-dev-001}
+  internal-api-key: ${INTERNAL_API_KEY:}
+  command:
+    default-intensity: 3
+  outbox:
+    poll-interval-ms: ${OUTBOX_POLL_INTERVAL_MS:2000}
+    lease-seconds: ${OUTBOX_LEASE_SECONDS:30}
+    batch-size: ${OUTBOX_BATCH_SIZE:20}
+  aws:
+    region: ${AWS_REGION:us-east-1}
+    endpoint: ${AWS_ENDPOINT:}
+    sns-topic-arn: ${SNS_SUBMISSION_EVENTS_TOPIC_ARN:}

@@ -11,6 +11,7 @@ import { Button } from '@cybersixseven/ui';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { toSubmissionAnswers, validateAnswers } from './validation';
+import { AccessoryStatusPanel } from './AccessoryStatusPanel';
 import styles from './page.module.css';
 
 export function QuestionForm() {
@@ -98,6 +99,10 @@ export function QuestionForm() {
           <p className={styles.status}>
             Score {result.score} / {result.maxScore}
           </p>
+          <p className={styles.status} data-testid="device-delivery-note">
+            Companion device signal queued. Results here are from the server response, not
+            hardware acknowledgement.
+          </p>
           <ul className={styles.options}>
             {result.answers.map((answer) => (
               <li key={answer.questionId} className={styles.option}>
@@ -115,6 +120,9 @@ export function QuestionForm() {
           </ul>
           {/* Capability stays in memory for later same-session polling; never render/log it. */}
           {submissionSecret ? <span hidden data-testid="capability-held" /> : null}
+          {result && submissionSecret ? (
+            <AccessoryStatusPanel submissionId={result.id} secret={submissionSecret} />
+          ) : null}
         </section>
       ) : (
         <Button type="submit" disabled={submitMutation.isPending || questions.length === 0}>

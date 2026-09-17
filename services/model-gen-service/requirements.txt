@@ -1,4 +1,4 @@
-# model-gen-service — v0.1 dependencies.
+# model-gen-service — v0.4 dependencies.
 # Every version is pinned with == on purpose: see documents/05-tech-stack.md §8.
 # Requires Python 3.12 or 3.13 (never 3.10) — see README.md.
 
@@ -6,9 +6,14 @@
 # reason for the Python floor: it publishes no cp310 wheel.
 build123d==0.11.1
 
-# HTTP surface. v0.1 exposes GET /health only.
+# HTTP surface. GET /health only; the SQS poller is a separate process.
 fastapi==0.141.1
 uvicorn==0.42.0
 
-# Focused v0.1 health and real-CAD smoke tests.
+# Queue consume + private S3 upload. urllib3 arrives transitively with boto3
+# and is used for the internal PATCH callback with explicit connect/read timeouts.
+boto3==1.43.93
+
+# Tests: real CAD + moto 5 mock_aws (not the moto 4 mock_s3/mock_sqs decorators).
+moto==5.2.3
 pytest==9.0.2

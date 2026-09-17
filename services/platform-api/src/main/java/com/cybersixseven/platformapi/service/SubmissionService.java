@@ -4,9 +4,15 @@ import com.cybersixseven.platformapi.dto.AnswerSubmissionRequest;
 import com.cybersixseven.platformapi.dto.CreateSubmissionRequest;
 import com.cybersixseven.platformapi.dto.CreateSubmissionResponse;
 import com.cybersixseven.platformapi.dto.ScoredAnswerResponse;
+import com.cybersixseven.platformapi.dto.SubmissionDetailResponse;
+import com.cybersixseven.platformapi.entity.Device;
+import com.cybersixseven.platformapi.entity.DeviceCommandEvent;
+import com.cybersixseven.platformapi.entity.OutboxEvent;
 import com.cybersixseven.platformapi.entity.Question;
 import com.cybersixseven.platformapi.entity.ScoredAnswerSnapshot;
 import com.cybersixseven.platformapi.entity.Submission;
+import com.cybersixseven.platformapi.event.OutboxCommittedEvent;
+import com.cybersixseven.platformapi.repository.OutboxEventRepository;
 import com.cybersixseven.platformapi.repository.QuestionRepository;
 import com.cybersixseven.platformapi.repository.SubmissionRepository;
 import com.cybersixseven.platformapi.service.SubmissionCapabilityGenerator.GeneratedCapability;
@@ -17,23 +23,40 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class SubmissionService {
 
+    static final String EVENT_CORRECT = "correct";
+    static final String EVENT_INCORRECT = "incorrect";
+
     private final QuestionRepository questionRepository;
     private final SubmissionRepository submissionRepository;
+    private final OutboxEventRepository outboxEventRepository;
+    private final DeviceAssignmentService deviceAssignmentService;
     private final SubmissionCapabilityGenerator capabilityGenerator;
+    private final ApplicationEventPublisher eventPublisher;
+    private final int defaultIntensity;
 
     public SubmissionService(
             QuestionRepository questionRepository,
             SubmissionRepository submissionRepository,
-            SubmissionCapabilityGenerator capabilityGenerator) {
+            OutboxEventRepository outboxEventRepository,
+            DeviceAssignmentService deviceAssignmentService,
+            SubmissionCapabilityGenerator capabilityGenerator,
+            ApplicationEventPublisher eventPublisher,
+            @Value("${app.command.default-intensity}") int defaultIntensity) {
         this.questionRepository = questionRepository;
         this.submissionRepository = submissionRepository;
+        this.outboxEventRepository = outboxEventRepository;
+        this.deviceAssignmentService = deviceAssignmentService;
         this.capabilityGenerator = capabilityGenerator;
+        this.eventPublisher = eventPublisher;
+        this.defaultIntensity = defaultIntensity;
     }
 
     @Transactional
@@ -47,6 +70,7 @@ public class SubmissionService {
         int score = snapshots.stream().mapToInt(ScoredAnswerSnapshot::awardedPoints).sum();
         int maxScore = snapshots.stream().mapToInt(ScoredAnswerSnapshot::maxPoints).sum();
         GeneratedCapability capability = capabilityGenerator.generate();
+        Instant now = Instant.now();
 
         Submission submission = new Submission(
                 UUID.randomUUID(),
@@ -54,8 +78,16 @@ public class SubmissionService {
                 score,
                 maxScore,
                 capability.hash(),
-                Instant.now());
+                now);
         submissionRepository.save(submission);
+
+        Device device = deviceAssignmentService.requireAssignedDevice();
+        UUID commandId = UUID.randomUUID();
+        String event = score == maxScore ? EVENT_CORRECT : EVENT_INCORRECT;
+        DeviceCommandEvent payload = new DeviceCommandEvent(
+                commandId, submission.getId(), device.getHardwareId(), event, defaultIntensity);
+        outboxEventRepository.save(new OutboxEvent(commandId, payload, now));
+        eventPublisher.publishEvent(new OutboxCommittedEvent(commandId));
 
         return new CreateSubmissionResponse(
                 submission.getId(),
@@ -63,6 +95,28 @@ public class SubmissionService {
                 score,
                 maxScore,
                 snapshots.stream().map(this::toResponse).toList());
+    }
+
+    @Transactional(readOnly = true)
+    public SubmissionDetailResponse getByCapability(UUID submissionId, String secret) {
+        if (submissionId == null || secret == null || secret.isBlank()) {
+            throw new SubmissionNotFoundException();
+        }
+        Submission submission = submissionRepository
+                .findById(submissionId)
+                .orElseThrow(SubmissionNotFoundException::new);
+        if (!capabilityGenerator.matches(submission.getSubmissionSecretHash(), secret)) {
+            throw new SubmissionNotFoundException();
+        }
+        String accessoryStatus = submission.getAccessoryKey() == null
+                ? SubmissionDetailResponse.PENDING
+                : SubmissionDetailResponse.READY;
+        return new SubmissionDetailResponse(
+                submission.getId(),
+                submission.getScore(),
+                submission.getMaxScore(),
+                submission.getAnswers().stream().map(this::toResponse).toList(),
+                accessoryStatus);
     }
 
     private Map<UUID, Integer> validateAndIndex(

@@ -34,6 +34,16 @@ export interface CreateSubmissionResponse {
   answers: ScoredAnswer[];
 }
 
+export type AccessoryStatus = 'PENDING' | 'READY' | 'FAILED';
+
+export interface SubmissionDetail {
+  id: string;
+  score: number;
+  maxScore: number;
+  answers: ScoredAnswer[];
+  accessoryStatus: AccessoryStatus;
+}
+
 export interface ApiErrorBody {
   code?: string;
   message?: string;
