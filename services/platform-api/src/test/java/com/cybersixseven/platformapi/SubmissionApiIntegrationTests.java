@@ -3,7 +3,6 @@ package com.cybersixseven.platformapi;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.cybersixseven.platformapi.entity.OutboxEvent;
@@ -13,7 +12,6 @@ import com.cybersixseven.platformapi.repository.OutboxEventRepository;
 import com.cybersixseven.platformapi.repository.SubmissionRepository;
 import java.io.IOException;
 import java.net.URI;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
@@ -50,7 +48,7 @@ class SubmissionApiIntegrationTests extends PostgresIntegrationTest {
     private final OutboxEventRepository outboxEventRepository;
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
-    private final HttpClient httpClient;
+    private AuthSupport auth;
 
     @Autowired
     SubmissionApiIntegrationTests(
@@ -62,11 +60,10 @@ class SubmissionApiIntegrationTests extends PostgresIntegrationTest {
         this.outboxEventRepository = outboxEventRepository;
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
-        this.httpClient = HttpClient.newHttpClient();
     }
 
     @BeforeEach
-    void resetDatabase() {
+    void resetDatabase() throws IOException, InterruptedException {
         outboxEventRepository.deleteAll();
         submissionRepository.deleteAll();
         jdbcTemplate.update(
@@ -74,11 +71,14 @@ class SubmissionApiIntegrationTests extends PostgresIntegrationTest {
                 "What is 7 + 5?",
                 12,
                 "00000000-0000-0000-0000-000000000001");
+        auth = new AuthSupport(port, objectMapper);
+        auth.bootstrapCsrf();
     }
 
     @Test
     void questionsNeverExposeCorrectAnswers() throws IOException, InterruptedException {
-        HttpResponse<String> response = get("/api/questions");
+        AuthSupport.Session session = auth.registerStudent();
+        HttpResponse<String> response = get("/api/questions", session.accessToken());
         JsonNode questions = objectMapper.readTree(response.body());
 
         assertEquals(200, response.statusCode());
@@ -93,7 +93,8 @@ class SubmissionApiIntegrationTests extends PostgresIntegrationTest {
     @Test
     void validSubmissionReturnsServerScoreAndStoresOnlyCapabilityHash()
             throws IOException, InterruptedException, NoSuchAlgorithmException {
-        HttpResponse<String> response = post(VALID_REQUEST);
+        AuthSupport.Session session = auth.registerStudent();
+        HttpResponse<String> response = post(VALID_REQUEST, session.accessToken());
         JsonNode body = objectMapper.readTree(response.body());
 
         assertEquals(201, response.statusCode());
@@ -110,7 +111,7 @@ class SubmissionApiIntegrationTests extends PostgresIntegrationTest {
         byte[] expectedHash = MessageDigest.getInstance("SHA-256")
                 .digest(capability.getBytes(StandardCharsets.UTF_8));
 
-        assertNull(stored.getStudentId());
+        assertEquals(java.util.UUID.fromString(session.userId()), stored.getStudentId());
         assertArrayEquals(expectedHash, stored.getSubmissionSecretHash());
         assertEquals(2, stored.getScore());
 
@@ -123,7 +124,14 @@ class SubmissionApiIntegrationTests extends PostgresIntegrationTest {
     }
 
     @Test
+    void unauthenticatedSubmissionIsUnauthorized() throws IOException, InterruptedException {
+        assertEquals(401, post(VALID_REQUEST, null).statusCode());
+        assertEquals(0, submissionRepository.count());
+    }
+
+    @Test
     void invalidRequestsCreateNoPartialRows() throws IOException, InterruptedException {
+        AuthSupport.Session session = auth.registerStudent();
         List<String> invalidRequests = List.of(
                 """
                 {"answers":[
@@ -155,7 +163,7 @@ class SubmissionApiIntegrationTests extends PostgresIntegrationTest {
                         + ",\"score\":999}");
 
         for (String request : invalidRequests) {
-            assertEquals(400, post(request).statusCode());
+            assertEquals(400, post(request, session.accessToken()).statusCode());
         }
         assertEquals(0, submissionRepository.count());
         assertEquals(0, outboxEventRepository.count());
@@ -164,7 +172,7 @@ class SubmissionApiIntegrationTests extends PostgresIntegrationTest {
     @Test
     void laterQuestionEditCannotChangeStoredHistory()
             throws IOException, InterruptedException {
-        JsonNode body = objectMapper.readTree(post(VALID_REQUEST).body());
+        JsonNode body = objectMapper.readTree(post(VALID_REQUEST, auth.registerStudent().accessToken()).body());
         Submission before = submissionRepository.findById(
                         java.util.UUID.fromString(body.get("id").asText()))
                 .orElseThrow();
@@ -182,18 +190,22 @@ class SubmissionApiIntegrationTests extends PostgresIntegrationTest {
         assertEquals(12, after.getAnswers().get(0).correctAnswer());
     }
 
-    private HttpResponse<String> get(String path) throws IOException, InterruptedException {
-        HttpRequest request =
-                HttpRequest.newBuilder(URI.create("http://localhost:" + port + path)).GET().build();
-        return httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+    private HttpResponse<String> get(String path, String accessToken) throws IOException, InterruptedException {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path)).GET();
+        if (accessToken != null) {
+            builder.header("Authorization", "Bearer " + accessToken);
+        }
+        return auth.send(builder.build());
     }
 
-    private HttpResponse<String> post(String body) throws IOException, InterruptedException {
-        HttpRequest request = HttpRequest.newBuilder(
+    private HttpResponse<String> post(String body, String accessToken) throws IOException, InterruptedException {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(
                         URI.create("http://localhost:" + port + "/api/submissions"))
                 .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(body))
-                .build();
-        return httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                .POST(HttpRequest.BodyPublishers.ofString(body));
+        if (accessToken != null) {
+            builder.header("Authorization", "Bearer " + accessToken);
+        }
+        return auth.send(builder.build());
     }
 }

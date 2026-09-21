@@ -1,6 +1,14 @@
-export { configureApiClient, getApiBaseUrl, ApiConfigError } from './config';
 export {
+  configureApiClient,
+  configureClient,
+  getApiBaseUrl,
+  resetApiClientForTests,
+  ApiConfigError,
+} from './config';
+export {
+  claimSubmission,
   createSubmission,
+  downloadAccessory,
   fetchQuestions,
   fetchSubmission,
   SUBMISSION_SECRET_HEADER,
@@ -20,6 +28,7 @@ export {
   type AccessoryStatus,
   type AnswerSubmission,
   type ApiErrorBody,
+  type ClaimResponse,
   type CreateSubmissionRequest,
   type CreateSubmissionResponse,
   type Question,

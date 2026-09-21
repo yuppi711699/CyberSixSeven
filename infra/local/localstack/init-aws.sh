@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Re-runnable LocalStack bootstrap for v0.4.
+# Re-runnable LocalStack bootstrap for v0.5.
 # Owns SNS fan-out, both SQS subscriptions + DLQs, DynamoDB, and the private
 # accessories bucket. docker compose down -v && up must restore everything.
 set -euo pipefail
@@ -114,7 +114,34 @@ awslocal s3api put-public-access-block \
   --public-access-block-configuration \
   BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
 
-echo "localstack v0.4 ready"
+CORS_FILE="$(mktemp)"
+python3 - "$CORS_FILE" <<'PY'
+import json, sys
+
+path = sys.argv[1]
+config = {
+    "CORSRules": [
+        {
+            "AllowedOrigins": [
+                "https://app.aiastrologyperdictions.com",
+                "https://admin.aiastrologyperdictions.com",
+                "http://localhost:3000",
+                "http://localhost:3001",
+            ],
+            "AllowedMethods": ["GET"],
+            "AllowedHeaders": ["*"],
+            "ExposeHeaders": ["ETag", "Content-Length", "Content-Type"],
+            "MaxAgeSeconds": 300,
+        }
+    ]
+}
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(config, handle)
+PY
+awslocal s3api put-bucket-cors --bucket "$BUCKET_NAME" --cors-configuration "file://${CORS_FILE}"
+rm -f "$CORS_FILE"
+
+echo "localstack v0.5 ready"
 echo "topic=$TOPIC_ARN"
 echo "device-queue=$DEVICE_QUEUE_URL"
 echo "model-gen-queue=$MODEL_QUEUE_URL"

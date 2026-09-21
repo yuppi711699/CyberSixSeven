@@ -8,6 +8,12 @@ spring:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/cybersixseven}
     username: ${DB_USERNAME:cybersixseven}
     password: ${DB_PASSWORD}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      connect-timeout: 2s
+      timeout: 2s
   jpa:
     hibernate:
       ddl-auto: none
@@ -15,6 +21,17 @@ spring:
   jackson:
     deserialization:
       fail-on-unknown-properties: true
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_OAUTH_CLIENT_ID}
+            client-secret: ${GOOGLE_OAUTH_CLIENT_SECRET}
+            scope:
+              - openid
+              - profile
+              - email
 
 management:
   endpoint:
@@ -31,11 +48,34 @@ management:
 app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS}
+  product-enabled: ${APP_PRODUCT_ENABLED:true}
   fixtures:
     enabled: ${APP_FIXTURES_ENABLED:false}
+    teacher-email: ${FIXTURE_TEACHER_EMAIL:}
+    teacher-password: ${FIXTURE_TEACHER_PASSWORD:}
+    teacher-nickname: ${FIXTURE_TEACHER_NICKNAME:Teacher}
+    admin-email: ${FIXTURE_ADMIN_EMAIL:}
+    admin-password: ${FIXTURE_ADMIN_PASSWORD:}
+    admin-nickname: ${FIXTURE_ADMIN_NICKNAME:Admin}
   devices:
     demo-device-id: ${APP_DEMO_DEVICE_ID:esp32-dev-001}
   internal-api-key: ${INTERNAL_API_KEY:}
+  jwt:
+    secret: ${JWT_SECRET}
+    ttl: ${JWT_TTL:10m}
+    issuer: ${JWT_ISSUER:https://api.aiastrologyperdictions.com}
+  auth:
+    refresh-ttl: ${REFRESH_TTL:14d}
+    exchange-ttl: 60s
+    cookie-secure: ${AUTH_COOKIE_SECURE:true}
+    cookie-name: refresh_token
+    cookie-path: /api/auth
+  frontends:
+    student-origin: ${STUDENT_ORIGIN:https://app.aiastrologyperdictions.com}
+    admin-origin: ${ADMIN_ORIGIN:https://admin.aiastrologyperdictions.com}
+  oauth:
+    fixture:
+      enabled: ${APP_OAUTH_FIXTURE_ENABLED:false}
   command:
     default-intensity: 3
   outbox:
@@ -46,3 +86,6 @@ app:
     region: ${AWS_REGION:us-east-1}
     endpoint: ${AWS_ENDPOINT:}
     sns-topic-arn: ${SNS_SUBMISSION_EVENTS_TOPIC_ARN:}
+    s3:
+      bucket: ${ACCESSORY_BUCKET:cybersixseven-accessories}
+      presign-ttl: 5m

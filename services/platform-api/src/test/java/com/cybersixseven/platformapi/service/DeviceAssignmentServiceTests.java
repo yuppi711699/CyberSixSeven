@@ -37,6 +37,15 @@ class DeviceAssignmentServiceTests {
     }
 
     @Test
+    void prefersTheStudentsAssignedDevice() {
+        UUID studentId = UUID.fromString("11111111-1111-1111-1111-111111111111");
+        Device assigned = new Device(UUID.randomUUID(), "esp32-student", Instant.parse("2026-09-16T00:00:00Z"));
+        when(deviceRepository.findFirstByStudentIdAndActiveTrue(studentId)).thenReturn(Optional.of(assigned));
+
+        assertEquals(assigned, service.requireAssignedDevice(studentId));
+    }
+
+    @Test
     void failsWhenTheDemoDeviceIsMissing() {
         when(deviceRepository.findByHardwareIdAndActiveTrue("esp32-dev-001")).thenReturn(Optional.empty());
         assertThrows(DeviceNotProvisionedException.class, service::requireAssignedDevice);

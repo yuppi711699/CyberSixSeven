@@ -72,6 +72,50 @@ describe('AccessoryStatusPanel', () => {
     assertNoLeak(container);
   });
 
+  it('downloads through the API and revokes the blob URL', async () => {
+    const createObjectURL = vi.fn(() => 'blob:http://localhost/tmp');
+    const revokeObjectURL = vi.fn();
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(createObjectURL);
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(revokeObjectURL);
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo) => {
+        const url = String(input);
+        if (url.endsWith('/accessory/download')) {
+          expect(url).not.toMatch(/s3|x-amz-|secret=/i);
+          return new Response(new Blob(['solid']), { status: 200 });
+        }
+        return new Response(JSON.stringify({ ...detail, accessoryStatus: 'READY' }), { status: 200 });
+      }),
+    );
+
+    render(
+      createElement(
+        QueryClientProvider,
+        {
+          client: new QueryClient({
+            defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+          }),
+        },
+        createElement(AccessoryStatusPanel, {
+          submissionId: 'sub-1',
+          secret: 'memory-only',
+          canDownload: true,
+          pollIntervalMs: 20,
+          pollTimeoutMs: 5_000,
+        }),
+      ),
+    );
+
+    expect(await screen.findByRole('button', { name: 'Download accessory' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Download accessory' }));
+    await waitFor(() => {
+      expect(createObjectURL).toHaveBeenCalled();
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:http://localhost/tmp');
+    });
+  });
+
   it('stops polling on terminal failure', async () => {
     const fetchMock = vi.fn(async () => {
       return new Response(JSON.stringify({ ...detail, accessoryStatus: 'FAILED' }), { status: 200 });

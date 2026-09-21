@@ -10,4 +10,6 @@ public interface DeviceRepository extends JpaRepository<Device, UUID> {
     Optional<Device> findByHardwareId(String hardwareId);
 
     Optional<Device> findByHardwareIdAndActiveTrue(String hardwareId);
+
+    Optional<Device> findFirstByStudentIdAndActiveTrue(UUID studentId);
 }

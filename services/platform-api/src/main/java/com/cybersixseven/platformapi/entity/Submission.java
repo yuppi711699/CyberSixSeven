@@ -43,18 +43,29 @@ public class Submission {
 
     public Submission(
             UUID id,
+            UUID studentId,
             List<ScoredAnswerSnapshot> answers,
             int score,
             int maxScore,
             byte[] submissionSecretHash,
             Instant createdAt) {
         this.id = id;
-        this.studentId = null;
+        this.studentId = studentId;
         this.answers = List.copyOf(answers);
         this.score = score;
         this.maxScore = maxScore;
         this.submissionSecretHash = submissionSecretHash.clone();
         this.createdAt = createdAt;
+    }
+
+    public Submission(
+            UUID id,
+            List<ScoredAnswerSnapshot> answers,
+            int score,
+            int maxScore,
+            byte[] submissionSecretHash,
+            Instant createdAt) {
+        this(id, null, answers, score, maxScore, submissionSecretHash, createdAt);
     }
 
     public UUID getId() {
@@ -87,6 +98,20 @@ public class Submission {
 
     public void setAccessoryKey(String accessoryKey) {
         this.accessoryKey = accessoryKey;
+    }
+
+    public void assignOwner(UUID studentId) {
+        if (studentId == null) {
+            throw new IllegalArgumentException("studentId is required");
+        }
+        this.studentId = studentId;
+    }
+
+    public void revokeCapability(byte[] replacementHash) {
+        if (replacementHash == null || replacementHash.length == 0) {
+            throw new IllegalArgumentException("replacementHash is required");
+        }
+        this.submissionSecretHash = replacementHash.clone();
     }
 
     public Instant getCreatedAt() {

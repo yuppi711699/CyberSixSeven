@@ -46,5 +46,6 @@ crash.log
 *.stl
 
 # OS / editor
-.DS_Store
-*.log
+playwright-report/
+test-results/
+blob-report/

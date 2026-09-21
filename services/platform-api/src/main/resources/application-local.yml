@@ -1,0 +1,10 @@
+# Local-profile exact origins only. Production never loads this file.
+app:
+  product-enabled: true
+  auth:
+    cookie-secure: false
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:3001}
+  frontends:
+    student-origin: ${STUDENT_ORIGIN:http://localhost:3000}
+    admin-origin: ${ADMIN_ORIGIN:http://localhost:3001}

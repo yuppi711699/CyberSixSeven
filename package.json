@@ -12,7 +12,8 @@
     "lint": "turbo run lint",
     "test": "turbo run test",
     "format": "prettier --write \"apps/**/*.{ts,tsx,css,json,md}\" \"packages/**/*.{ts,tsx,css,json,md}\"",
-    "format:check": "prettier --check \"apps/**/*.{ts,tsx,css,json,md}\" \"packages/**/*.{ts,tsx,css,json,md}\""
+    "format:check": "prettier --check \"apps/**/*.{ts,tsx,css,json,md}\" \"packages/**/*.{ts,tsx,css,json,md}\"",
+    "e2e": "playwright test --project=chromium"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
@@ -20,6 +21,7 @@
     "prettier": "3.9.6",
     "turbo": "2.10.12",
     "typescript": "5.9.3",
-    "typescript-eslint": "8.70.0"
+    "typescript-eslint": "8.70.0",
+    "@playwright/test": "1.63.0"
   }
 }

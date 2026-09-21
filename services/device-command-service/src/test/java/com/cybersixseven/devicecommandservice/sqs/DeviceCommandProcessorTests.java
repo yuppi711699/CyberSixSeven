@@ -158,7 +158,7 @@ class DeviceCommandProcessorTests {
 
     ArgumentCaptor<ReceiveMessageRequest> captor = ArgumentCaptor.forClass(ReceiveMessageRequest.class);
     verify(sqsClient).receiveMessage(captor.capture());
-    assertEquals(20, captor.getValue().waitTimeSeconds());
+    assertEquals(5, captor.getValue().waitTimeSeconds());
     assertEquals(60, captor.getValue().visibilityTimeout());
     assertEquals(10, captor.getValue().maxNumberOfMessages());
   }

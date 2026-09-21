@@ -1,7 +1,41 @@
 let configuredBaseUrl: string | undefined;
+let getAccessToken: (() => string | null | undefined) | undefined;
+let onUnauthorized: (() => Promise<unknown> | unknown) | undefined;
+
+export interface ClientOptions {
+  baseUrl?: string;
+  getAccessToken?: () => string | null | undefined;
+  onUnauthorized?: () => Promise<unknown> | unknown;
+}
 
 export function configureApiClient(options: { baseUrl: string }): void {
-  configuredBaseUrl = options.baseUrl.replace(/\/$/, '');
+  configureClient(options);
+}
+
+export function configureClient(options: ClientOptions): void {
+  if (options.baseUrl) {
+    configuredBaseUrl = options.baseUrl.replace(/\/$/, '');
+  }
+  if (options.getAccessToken) {
+    getAccessToken = options.getAccessToken;
+  }
+  if (options.onUnauthorized) {
+    onUnauthorized = options.onUnauthorized;
+  }
+}
+
+export function getConfiguredAccessToken(): string | null {
+  return getAccessToken?.() ?? null;
+}
+
+export async function notifyUnauthorized(): Promise<void> {
+  await onUnauthorized?.();
+}
+
+export function resetApiClientForTests(): void {
+  configuredBaseUrl = undefined;
+  getAccessToken = undefined;
+  onUnauthorized = undefined;
 }
 
 export function getApiBaseUrl(): string {

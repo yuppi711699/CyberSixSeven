@@ -2,11 +2,13 @@
 
 import {
   ApiClientError,
+  claimSubmission,
   questionsQueryOptions,
   submitAnswersMutationOptions,
   type CreateSubmissionResponse,
   type Question,
 } from '@cybersixseven/api-client';
+import { useAuth } from '@cybersixseven/auth-client';
 import { Button } from '@cybersixseven/ui';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
@@ -15,6 +17,7 @@ import { AccessoryStatusPanel } from './AccessoryStatusPanel';
 import styles from './page.module.css';
 
 export function QuestionForm() {
+  const { user } = useAuth();
   const questionsQuery = useQuery(questionsQueryOptions());
   const submitMutation = useMutation(submitAnswersMutationOptions());
 
@@ -56,6 +59,13 @@ export function QuestionForm() {
         onSuccess: (response) => {
           setResult(response);
           setSubmissionSecret(response.submissionSecret);
+          if (user && response.submissionSecret) {
+            void claimSubmission(response.id, response.submissionSecret)
+              .then(() => setSubmissionSecret(null))
+              .catch(() => {
+                /* keep capability for unclaimed polling */
+              });
+          }
         },
       },
     );
@@ -120,8 +130,12 @@ export function QuestionForm() {
           </ul>
           {/* Capability stays in memory for later same-session polling; never render/log it. */}
           {submissionSecret ? <span hidden data-testid="capability-held" /> : null}
-          {result && submissionSecret ? (
-            <AccessoryStatusPanel submissionId={result.id} secret={submissionSecret} />
+          {result && (submissionSecret || user) ? (
+            <AccessoryStatusPanel
+              submissionId={result.id}
+              secret={submissionSecret}
+              canDownload={Boolean(user)}
+            />
           ) : null}
         </section>
       ) : (

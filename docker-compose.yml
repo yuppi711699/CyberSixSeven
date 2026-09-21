@@ -1,7 +1,7 @@
 # Local development stack for CyberSixSeven.
-# v0.4: Postgres, LocalStack (SNS/SQS/DynamoDB/S3), Mosquitto mTLS.
-# Redis and Jaeger arrive in later versions. Pin LocalStack to 4.7 — 2026.03+
-# unified images require an auth token this repo does not store.
+# v0.5: Postgres, Redis, LocalStack (SNS/SQS/DynamoDB/S3), Mosquitto mTLS.
+# Jaeger arrives in v0.7. Pin LocalStack to 4.7 — 2026.03+ unified images
+# require an auth token this repo does not store.
 services:
   postgres:
     image: postgres:17
@@ -20,6 +20,18 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  redis:
+    image: redis:7
+    container_name: cybersixseven-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
 
   localstack:
     image: localstack/localstack:4.7

@@ -17,14 +17,16 @@ import com.cybersixseven.platformapi.dto.AnswerSubmissionRequest;
 import com.cybersixseven.platformapi.dto.CreateSubmissionRequest;
 import com.cybersixseven.platformapi.entity.DeviceCommandEvent;
 import com.cybersixseven.platformapi.entity.OutboxEvent;
+import com.cybersixseven.platformapi.entity.UserAccount;
+import com.cybersixseven.platformapi.entity.UserRole;
 import com.cybersixseven.platformapi.repository.OutboxEventRepository;
 import com.cybersixseven.platformapi.repository.SubmissionRepository;
+import com.cybersixseven.platformapi.repository.UserAccountRepository;
 import com.cybersixseven.platformapi.service.OutboxClaimService;
 import com.cybersixseven.platformapi.service.OutboxPublisher;
 import com.cybersixseven.platformapi.service.SubmissionService;
 import java.io.IOException;
 import java.net.URI;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
@@ -43,6 +45,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import software.amazon.awssdk.services.sns.model.PublishRequest;
@@ -73,9 +76,12 @@ class OutboxIntegrationTests extends PostgresIntegrationTest {
     private final OutboxPublisher outboxPublisher;
     private final OutboxClaimService outboxClaimService;
     private final SubmissionService submissionService;
+    private final UserAccountRepository userAccountRepository;
+    private final PasswordEncoder passwordEncoder;
     private final PlatformTransactionManager transactionManager;
     private final ObjectMapper objectMapper;
-    private final HttpClient httpClient;
+    private AuthSupport auth;
+    private UUID studentId;
 
     @Autowired
     OutboxIntegrationTests(
@@ -84,6 +90,8 @@ class OutboxIntegrationTests extends PostgresIntegrationTest {
             OutboxPublisher outboxPublisher,
             OutboxClaimService outboxClaimService,
             SubmissionService submissionService,
+            UserAccountRepository userAccountRepository,
+            PasswordEncoder passwordEncoder,
             PlatformTransactionManager transactionManager,
             ObjectMapper objectMapper) {
         this.submissionRepository = submissionRepository;
@@ -91,18 +99,29 @@ class OutboxIntegrationTests extends PostgresIntegrationTest {
         this.outboxPublisher = outboxPublisher;
         this.outboxClaimService = outboxClaimService;
         this.submissionService = submissionService;
+        this.userAccountRepository = userAccountRepository;
+        this.passwordEncoder = passwordEncoder;
         this.transactionManager = transactionManager;
         this.objectMapper = objectMapper;
-        this.httpClient = HttpClient.newHttpClient();
     }
 
     @BeforeEach
-    void resetRows() {
+    void resetRows() throws Exception {
         outboxEventRepository.deleteAll();
         submissionRepository.deleteAll();
         reset(snsClient);
         when(snsClient.publish(any(PublishRequest.class)))
                 .thenReturn(PublishResponse.builder().messageId("test-sns").build());
+        UserAccount student = userAccountRepository.save(new UserAccount(
+                UUID.randomUUID(),
+                "outbox-" + UUID.randomUUID() + "@example.test",
+                passwordEncoder.encode("password1"),
+                "Outbox",
+                UserRole.STUDENT,
+                Instant.now()));
+        studentId = student.getId();
+        auth = new AuthSupport(port, objectMapper);
+        auth.bootstrapCsrf();
     }
 
     @Test
@@ -137,7 +156,7 @@ class OutboxIntegrationTests extends PostgresIntegrationTest {
         TransactionTemplate template = new TransactionTemplate(transactionManager);
         try {
             template.executeWithoutResult(status -> {
-                submissionService.submit(validRequest());
+                submissionService.submit(validRequest(), studentId);
                 throw new IllegalStateException("force-rollback");
             });
         } catch (IllegalStateException ignored) {
@@ -250,11 +269,13 @@ class OutboxIntegrationTests extends PostgresIntegrationTest {
     }
 
     private HttpResponse<String> post(String body) throws IOException, InterruptedException {
+        AuthSupport.Session session = auth.registerStudent();
         HttpRequest request = HttpRequest.newBuilder(
                         URI.create("http://localhost:" + port + "/api/submissions"))
                 .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + session.accessToken())
                 .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build();
-        return httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        return auth.send(request);
     }
 }

@@ -91,7 +91,7 @@ class HeartbeatAuthorizationTests extends PostgresIntegrationTest {
         assertEquals("{\"status\":\"UP\"}", get("/actuator/health").body());
         int denied = get("/nope").statusCode();
         assertTrue(denied == 401 || denied == 403, "fallback must not be public: " + denied);
-        assertEquals(200, get("/api/questions").statusCode());
+        assertEquals(401, get("/api/questions").statusCode());
     }
 
     private HttpResponse<String> get(String path) throws IOException, InterruptedException {

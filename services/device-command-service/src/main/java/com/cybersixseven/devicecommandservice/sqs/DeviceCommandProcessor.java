@@ -50,7 +50,10 @@ public class DeviceCommandProcessor {
     }
     ReceiveMessageResponse response = sqsClient.receiveMessage(ReceiveMessageRequest.builder()
         .queueUrl(queueUrl)
-        .waitTimeSeconds(20)
+        // Must stay under AwsClientConfig apiCallAttemptTimeout (10s). Wait=20 +
+        // attempt=10 made empty-queue long polls throw ApiCallTimeoutException, so
+        // new quiz submits never reached MQTT after the first drain.
+        .waitTimeSeconds(5)
         .maxNumberOfMessages(10)
         .visibilityTimeout(60)
         .build());

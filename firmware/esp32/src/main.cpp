@@ -12,6 +12,8 @@
 #include <WiFiClientSecure.h>
 #include <time.h>
 
+#include "face.h"
+#include "ssd1306.h"
 #include "../secrets.h"
 
 #ifndef C67_SECRETS_HAS_MQTT
@@ -184,6 +186,11 @@ void startEffect(bool gentle, int intensity) {
   setLed(false);
   motor(!gentle);
   buzzerTone(gentle ? 880 : 1400);
+  if (gentle) {
+    facePlayEncourage(effect.intensity);
+  } else {
+    facePlayHappy(effect.intensity);
+  }
 }
 
 void stopEffect() {
@@ -413,12 +420,15 @@ void setup() {
 
   Serial.println();
   Serial.println("[boot] CyberSixSeven ESP32 firmware v0.3");
-  Serial.printf("[boot] device=%s led=%u buzzer=%u motor=%u\n",
+  Serial.printf("[boot] device=%s led=%u buzzer=%u motor=%u oled sda=%u scl=%u\n",
                 DEVICE_ID,
                 static_cast<unsigned>(kLedPin),
                 static_cast<unsigned>(kBuzzerPin),
-                static_cast<unsigned>(kMotorPin));
+                static_cast<unsigned>(kMotorPin),
+                static_cast<unsigned>(kOledSdaPin),
+                static_cast<unsigned>(kOledSclPin));
 
+  faceBegin();
   loadRing();
   configureTls();
   WiFi.mode(WIFI_STA);
@@ -440,6 +450,7 @@ void loop() {
     subscribed = false;
     updateEffect(now);
     updateIdleLed(now, false);
+    faceUpdate(now, false);
     return;
   }
 
@@ -450,6 +461,7 @@ void loop() {
     if (!ntpReady(now)) {
       updateEffect(now);
       updateIdleLed(now, false);
+      faceUpdate(now, false);
       return;
     }
     phase = NetPhase::Mqtt;
@@ -468,5 +480,7 @@ void loop() {
 
   handlePendingCommand();
   updateEffect(now);
-  updateIdleLed(now, phase == NetPhase::Ready && mqtt.connected());
+  const bool online = phase == NetPhase::Ready && mqtt.connected();
+  updateIdleLed(now, online);
+  faceUpdate(now, online);
 }

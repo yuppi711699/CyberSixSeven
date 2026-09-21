@@ -27,10 +27,14 @@ export function submitAnswersMutationOptions() {
   });
 }
 
-export function submissionQueryOptions(id: string, secret: string) {
+export function submissionQueryOptions(
+  id: string,
+  options?: { secret?: string | null; enabled?: boolean },
+) {
+  const secret = options?.secret ?? null;
   return queryOptions({
-    queryKey: submissionKeys.detail(id),
+    queryKey: [...submissionKeys.detail(id), secret ? 'capability' : 'owner'] as const,
     queryFn: () => fetchSubmission(id, secret),
-    enabled: Boolean(id) && Boolean(secret),
+    enabled: options?.enabled ?? (Boolean(id) && Boolean(secret)),
   });
 }

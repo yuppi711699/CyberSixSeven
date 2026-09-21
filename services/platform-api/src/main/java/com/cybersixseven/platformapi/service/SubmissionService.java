@@ -1,6 +1,7 @@
 package com.cybersixseven.platformapi.service;
 
 import com.cybersixseven.platformapi.dto.AnswerSubmissionRequest;
+import com.cybersixseven.platformapi.dto.ClaimResponse;
 import com.cybersixseven.platformapi.dto.CreateSubmissionRequest;
 import com.cybersixseven.platformapi.dto.CreateSubmissionResponse;
 import com.cybersixseven.platformapi.dto.ScoredAnswerResponse;
@@ -60,7 +61,10 @@ public class SubmissionService {
     }
 
     @Transactional
-    public CreateSubmissionResponse submit(CreateSubmissionRequest request) {
+    public CreateSubmissionResponse submit(CreateSubmissionRequest request, UUID studentId) {
+        if (studentId == null) {
+            throw new AuthUnauthorizedException("UNAUTHORIZED", "authentication required");
+        }
         List<Question> questions = questionRepository.findAllByOrderByDisplayOrderAsc();
         Map<UUID, Integer> submittedAnswers = validateAndIndex(request, questions);
 
@@ -74,6 +78,7 @@ public class SubmissionService {
 
         Submission submission = new Submission(
                 UUID.randomUUID(),
+                studentId,
                 snapshots,
                 score,
                 maxScore,
@@ -81,7 +86,7 @@ public class SubmissionService {
                 now);
         submissionRepository.save(submission);
 
-        Device device = deviceAssignmentService.requireAssignedDevice();
+        Device device = deviceAssignmentService.requireAssignedDevice(studentId);
         UUID commandId = UUID.randomUUID();
         String event = score == maxScore ? EVENT_CORRECT : EVENT_INCORRECT;
         DeviceCommandEvent payload = new DeviceCommandEvent(
@@ -105,9 +110,49 @@ public class SubmissionService {
         Submission submission = submissionRepository
                 .findById(submissionId)
                 .orElseThrow(SubmissionNotFoundException::new);
+        if (submission.getStudentId() != null) {
+            throw new SubmissionNotFoundException();
+        }
         if (!capabilityGenerator.matches(submission.getSubmissionSecretHash(), secret)) {
             throw new SubmissionNotFoundException();
         }
+        return toDetail(submission);
+    }
+
+    @Transactional(readOnly = true)
+    public SubmissionDetailResponse getForOwner(UUID submissionId, UUID studentId) {
+        if (submissionId == null || studentId == null) {
+            throw new SubmissionNotFoundException();
+        }
+        Submission submission = submissionRepository
+                .findByIdAndStudentId(submissionId, studentId)
+                .orElseThrow(SubmissionNotFoundException::new);
+        return toDetail(submission);
+    }
+
+    @Transactional
+    public ClaimResponse claim(UUID submissionId, UUID studentId, String secret) {
+        if (submissionId == null || studentId == null || secret == null || secret.isBlank()) {
+            throw new SubmissionNotFoundException();
+        }
+        Submission submission = submissionRepository
+                .findById(submissionId)
+                .orElseThrow(SubmissionNotFoundException::new);
+        if (submission.getStudentId() != null) {
+            if (studentId.equals(submission.getStudentId())) {
+                return new ClaimResponse(submission.getId(), submission.getStudentId());
+            }
+            throw new SubmissionNotFoundException();
+        }
+        if (!capabilityGenerator.matches(submission.getSubmissionSecretHash(), secret)) {
+            throw new SubmissionNotFoundException();
+        }
+        submission.assignOwner(studentId);
+        submission.revokeCapability(capabilityGenerator.generate().hash());
+        return new ClaimResponse(submission.getId(), studentId);
+    }
+
+    private SubmissionDetailResponse toDetail(Submission submission) {
         String accessoryStatus = submission.getAccessoryKey() == null
                 ? SubmissionDetailResponse.PENDING
                 : SubmissionDetailResponse.READY;

@@ -1,0 +1,7 @@
+aws_region         = "us-east-1"
+environment        = "auth-preview"
+hosted_zone_name   = "aiastrologyperdictions.com"
+api_hostname       = "api.aiastrologyperdictions.com"
+platform_api_image = "123456789012.dkr.ecr.us-east-1.amazonaws.com/platform-api:REPLACE_WITH_COMMIT_SHA"
+db_password        = "set-in-uncommitted-terraform-tfvars"
+redis_auth_token   = "set-in-uncommitted-terraform-tfvars"

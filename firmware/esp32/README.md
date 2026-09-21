@@ -3,8 +3,9 @@
 PlatformIO project for the CyberSixSeven device.
 
 **v0.3 scope:** join Wi-Fi, wait for NTP, connect to Mosquitto over mTLS, subscribe
-to `devices/{deviceId}/commands` at QoS 1, run one LED/buzzer/motor effect per new
-`commandId`, persist a 64-entry NVS ring, and ACK on `devices/{deviceId}/status`.
+to `devices/{deviceId}/commands` at QoS 1, run one LED/buzzer/motor/OLED-face
+effect per new `commandId`, persist a 64-entry NVS ring, and ACK on
+`devices/{deviceId}/status`.
 
 ## Board identity
 
@@ -20,6 +21,8 @@ to `devices/{deviceId}/commands` at QoS 1, run one LED/buzzer/motor effect per n
 ```bash
 ## XXXX=0001
 pio run -t upload --upload-port /dev/cu.usbserial-XXXX
+pio run -t upload --upload-port /dev/cu.usbserial-0001 
+|| pio run -d firmware/esp32 -t upload --upload-port /dev/cu.usbserial-0001
 pio device monitor --port /dev/cu.usbserial-0001 -b 115200 --dtr 0 --rts 0
 ```
 
@@ -59,9 +62,24 @@ Do not claim end-to-end exactly-once transport.
 | External LED | **2** | digital out | series resistor |
 | Passive buzzer | **4** | PWM out | NPN/MOSFET low-side |
 | Vibration / DC motor | **5** | digital out | MOSFET + flyback diode |
+| SSD1306 OLED SDA | **21** | I2C | 3.3 V module, 4.7 kΩ pull-ups usually on the board |
+| SSD1306 OLED SCL | **22** | I2C | address `0x3C` (fallback `0x3D`) |
 
-Incorrect reactions are gentle (soft LED + rising tone). Correct reactions are
-upbeat. Intensity is clamped to 1–5.
+### 0.96" SSD1306 128×64 (4-pin I2C)
+
+| OLED pin | ESP32 |
+|---|---|
+| VCC | **3.3 V** (not 5 V unless the module is marked 5 V-tolerant) |
+| GND | GND |
+| SCL / SCK / CLK | GPIO **22** |
+| SDA | GPIO **21** |
+
+Pin order on cheap modules is sometimes VCC-GND-SCL-SDA, sometimes GND-VCC-SCL-SDA. Match labels, not left-to-right. Shared ground with the DevKit. No extra PlatformIO library — the driver is `src/ssd1306.cpp` over Arduino `Wire`.
+
+Idle: eyes look around and blink. `event=correct` (student passed): bounce + happy squint + sparkle. `event=incorrect`: gentle sway + hopeful blink, not an X or a frown.
+
+Incorrect reactions are gentle (soft LED + rising tone + encouraging face). Correct
+reactions are upbeat. Intensity is clamped to 1–5.
 
 ## Build
 
@@ -72,3 +90,29 @@ pio run -d firmware/esp32
 Serial must show `[ntp] synchronized` **before** `[mqtt] starting tls connection`.
 Unauthenticated MQTT clients are rejected by Mosquitto; prove that from the
 broker/Paho tests, not by disabling TLS verification on the ESP32.
+
+If serial shows `(-9984) X509 - Certificate verification failed` after NTP, the
+broker cert SAN lacks `DNS:<MQTT_BROKER_HOST>`. ESP32 mbedTLS 2.28 ignores IP
+SANs and only matches dNSName. Do not call `setInsecure()`. Reissue (same CA):
+
+```bash
+ISSUE_BROKER_ONLY=1 infra/local/mosquitto/certs/generate-certs.sh
+docker compose restart mosquitto
+```
+
+Then tap EN. No firmware reflash if `secrets.h` already has this CA.
+
+## Troubleshoot 
+
+If you see encoded responce from esp:
+
+If 115200 + --dtr 0 --rts 0 + EN still loops
+Chip is crash-resetting, not a monitor bug:
+
+1. Hold BOOT, tap EN, release BOOT, re-flash:
+```bash
+pio run -t upload --upload-port /dev/cu.usbserial-0001
+```
+2. Then monitor with --dtr 0 --rts 0 and tap EN.
+3. If you still only get ROM at 74880, flash didn’t stick or the board is browning out (bad cable / USB hub / motor rail). Swap to a data cable, plug into the Mac directly, no motor/buzzer yet.
+--dtr 0 --rts 0 first. That’s the CH340/macOS gotcha.

@@ -1,0 +1,18 @@
+# Bootstrap (once, protected/manual — never from CI auto-apply):
+# 1. Create an encrypted S3 bucket (versioning on) named below.
+# 2. Create a DynamoDB table with hash key LockID (S), PAY_PER_REQUEST.
+# 3. terraform init -backend-config=backend.hcl
+# 4. Copy terraform.tfvars.example → terraform.tfvars (uncommitted) and set secrets + immutable image SHA.
+#
+# Recovery:
+# - Do not copy production tfstate onto a laptop. Restore from S3 versioning.
+# - If a lock is stuck, confirm no apply is running, then delete that DynamoDB item.
+# - terraform force-unlock only after that confirmation.
+#
+# Apply stays protected/manual. Image tags are immutable commit SHAs.
+
+bucket         = "cybersixseven-tfstate"
+key            = "auth-preview/terraform.tfstate"
+region         = "us-east-1"
+dynamodb_table = "cybersixseven-tf-locks"
+encrypt        = true

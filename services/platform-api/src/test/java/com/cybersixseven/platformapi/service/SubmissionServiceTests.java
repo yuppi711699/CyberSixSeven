@@ -37,6 +37,8 @@ import org.springframework.context.ApplicationEventPublisher;
 @ExtendWith(MockitoExtension.class)
 class SubmissionServiceTests {
 
+    private static final UUID STUDENT_ID =
+            UUID.fromString("11111111-1111-1111-1111-111111111111");
     private static final UUID FIRST_ID =
             UUID.fromString("00000000-0000-0000-0000-000000000001");
     private static final UUID SECOND_ID =
@@ -90,13 +92,14 @@ class SubmissionServiceTests {
         when(outboxEventRepository.save(any(OutboxEvent.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
         Device device = new Device(UUID.randomUUID(), "esp32-dev-001", Instant.parse("2026-09-16T00:00:00Z"));
-        when(deviceAssignmentService.requireAssignedDevice()).thenReturn(device);
+        when(deviceAssignmentService.requireAssignedDevice(STUDENT_ID)).thenReturn(device);
 
-        CreateSubmissionResponse response = submissionService.submit(new CreateSubmissionRequest(
-                List.of(
+        CreateSubmissionResponse response = submissionService.submit(
+                new CreateSubmissionRequest(List.of(
                         new AnswerSubmissionRequest(FIRST_ID, 12),
                         new AnswerSubmissionRequest(SECOND_ID, 0),
-                        new AnswerSubmissionRequest(THIRD_ID, 12))));
+                        new AnswerSubmissionRequest(THIRD_ID, 12))),
+                STUDENT_ID);
 
         assertEquals(2, response.score());
         assertEquals(3, response.maxScore());
@@ -126,10 +129,12 @@ class SubmissionServiceTests {
     void perfectScoreEmitsCorrectEventWithFixedIntensity() {
         stubSuccessfulWrite();
 
-        submissionService.submit(new CreateSubmissionRequest(List.of(
-                new AnswerSubmissionRequest(FIRST_ID, 12),
-                new AnswerSubmissionRequest(SECOND_ID, 27),
-                new AnswerSubmissionRequest(THIRD_ID, 12))));
+        submissionService.submit(
+                new CreateSubmissionRequest(List.of(
+                        new AnswerSubmissionRequest(FIRST_ID, 12),
+                        new AnswerSubmissionRequest(SECOND_ID, 27),
+                        new AnswerSubmissionRequest(THIRD_ID, 12))),
+                STUDENT_ID);
 
         ArgumentCaptor<OutboxEvent> outboxCaptor = ArgumentCaptor.forClass(OutboxEvent.class);
         verify(outboxEventRepository).save(outboxCaptor.capture());
@@ -145,7 +150,7 @@ class SubmissionServiceTests {
                 new AnswerSubmissionRequest(FIRST_ID, 12),
                 new AnswerSubmissionRequest(THIRD_ID, 12)));
 
-        assertThrows(InvalidSubmissionException.class, () -> submissionService.submit(request));
+        assertThrows(InvalidSubmissionException.class, () -> submissionService.submit(request, STUDENT_ID));
         verify(submissionRepository, never()).save(any());
         verify(outboxEventRepository, never()).save(any());
         verify(eventPublisher, never()).publishEvent(any());
@@ -158,7 +163,7 @@ class SubmissionServiceTests {
                 new AnswerSubmissionRequest(FIRST_ID, 12),
                 new AnswerSubmissionRequest(SECOND_ID, 27)));
 
-        assertThrows(InvalidSubmissionException.class, () -> submissionService.submit(request));
+        assertThrows(InvalidSubmissionException.class, () -> submissionService.submit(request, STUDENT_ID));
         verify(submissionRepository, never()).save(any());
         verify(outboxEventRepository, never()).save(any());
     }
@@ -171,7 +176,7 @@ class SubmissionServiceTests {
                 new AnswerSubmissionRequest(SECOND_ID, 27),
                 new AnswerSubmissionRequest(UUID.randomUUID(), 12)));
 
-        assertThrows(InvalidSubmissionException.class, () -> submissionService.submit(request));
+        assertThrows(InvalidSubmissionException.class, () -> submissionService.submit(request, STUDENT_ID));
         verify(submissionRepository, never()).save(any());
         verify(outboxEventRepository, never()).save(any());
     }
@@ -184,7 +189,7 @@ class SubmissionServiceTests {
                 new AnswerSubmissionRequest(SECOND_ID, null),
                 new AnswerSubmissionRequest(THIRD_ID, 12)));
 
-        assertThrows(InvalidSubmissionException.class, () -> submissionService.submit(request));
+        assertThrows(InvalidSubmissionException.class, () -> submissionService.submit(request, STUDENT_ID));
         verify(submissionRepository, never()).save(any());
         verify(outboxEventRepository, never()).save(any());
     }
@@ -254,6 +259,81 @@ class SubmissionServiceTests {
                 () -> submissionService.getByCapability(submissionId, "plain-capability"));
     }
 
+    @Test
+    void capabilityLookupFailsOnceTheRowIsOwned() {
+        UUID submissionId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        Submission stored = new Submission(
+                submissionId,
+                STUDENT_ID,
+                List.of(),
+                2,
+                3,
+                new byte[32],
+                Instant.parse("2026-09-16T00:00:00Z"));
+        when(submissionRepository.findById(submissionId)).thenReturn(Optional.of(stored));
+
+        assertThrows(
+                SubmissionNotFoundException.class,
+                () -> submissionService.getByCapability(submissionId, "plain-capability"));
+    }
+
+    @Test
+    void ownerLookupUsesIdAndStudentIdTogether() {
+        UUID submissionId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        Submission stored = new Submission(
+                submissionId,
+                STUDENT_ID,
+                List.of(),
+                2,
+                3,
+                new byte[32],
+                Instant.parse("2026-09-16T00:00:00Z"));
+        when(submissionRepository.findByIdAndStudentId(submissionId, STUDENT_ID)).thenReturn(Optional.of(stored));
+
+        SubmissionDetailResponse detail = submissionService.getForOwner(submissionId, STUDENT_ID);
+        assertEquals(submissionId, detail.id());
+        verify(submissionRepository, never()).findById(any());
+    }
+
+    @Test
+    void claimBindsOwnerAndRevokesTheCapability() {
+        UUID submissionId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        Submission stored = new Submission(
+                submissionId,
+                List.of(),
+                2,
+                3,
+                new byte[32],
+                Instant.parse("2026-09-16T00:00:00Z"));
+        when(submissionRepository.findById(submissionId)).thenReturn(Optional.of(stored));
+        when(capabilityGenerator.matches(any(byte[].class), eq("plain-capability"))).thenReturn(true);
+        when(capabilityGenerator.generate())
+                .thenReturn(new GeneratedCapability("unused", new byte[] {1, 2, 3}));
+
+        var claimed = submissionService.claim(submissionId, STUDENT_ID, "plain-capability");
+        assertEquals(STUDENT_ID, claimed.studentId());
+        assertEquals(STUDENT_ID, stored.getStudentId());
+    }
+
+    @Test
+    void claimIsIdempotentForTheSameOwnerAndHidesOtherOwners() {
+        UUID submissionId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        Submission owned = new Submission(
+                submissionId,
+                STUDENT_ID,
+                List.of(),
+                2,
+                3,
+                new byte[32],
+                Instant.parse("2026-09-16T00:00:00Z"));
+        when(submissionRepository.findById(submissionId)).thenReturn(Optional.of(owned));
+
+        assertEquals(STUDENT_ID, submissionService.claim(submissionId, STUDENT_ID, "plain-capability").studentId());
+        assertThrows(
+                SubmissionNotFoundException.class,
+                () -> submissionService.claim(submissionId, UUID.randomUUID(), "plain-capability"));
+    }
+
     private void stubSuccessfulWrite() {
         givenQuestions();
         when(capabilityGenerator.generate())
@@ -262,7 +342,7 @@ class SubmissionServiceTests {
                 .thenAnswer(invocation -> invocation.getArgument(0));
         when(outboxEventRepository.save(any(OutboxEvent.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
-        when(deviceAssignmentService.requireAssignedDevice())
+        when(deviceAssignmentService.requireAssignedDevice(STUDENT_ID))
                 .thenReturn(new Device(UUID.randomUUID(), "esp32-dev-001", Instant.parse("2026-09-16T00:00:00Z")));
     }
 

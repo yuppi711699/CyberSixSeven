@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { createElement, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AuthProvider, login, resetAuthClientForTests } from '@cybersixseven/auth-client';
 import { QuestionForm } from './QuestionForm';
 
 const questions = [
@@ -59,6 +60,12 @@ function stubApi(handlers: {
 }) {
   return vi.fn(async (input: RequestInfo, init?: RequestInit) => {
     const url = String(input);
+    if (url.endsWith('/api/csrf')) {
+      return jsonResponse({ token: 'csrf-test' });
+    }
+    if (url.endsWith('/api/auth/refresh')) {
+      return jsonResponse({ code: 'UNAUTHORIZED', message: 'refresh token required' }, 401);
+    }
     if (url.endsWith('/api/questions')) {
       return jsonResponse(questions);
     }
@@ -86,7 +93,11 @@ function renderForm() {
   });
 
   return render(
-    createElement(QueryClientProvider, { client }, createElement(QuestionForm) as ReactNode),
+    createElement(
+      AuthProvider,
+      null,
+      createElement(QueryClientProvider, { client }, createElement(QuestionForm) as ReactNode),
+    ),
   );
 }
 
@@ -103,6 +114,7 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  resetAuthClientForTests();
 });
 
 beforeEach(() => {
@@ -241,6 +253,70 @@ describe('QuestionForm', () => {
             String(call[0]).endsWith('/api/submissions') && call[1]?.method === 'POST',
         ),
       ).toBe(true);
+    });
+  });
+
+  it('claims after authenticated submit and drops the in-memory capability', async () => {
+    const user = {
+      id: '11111111-1111-1111-1111-111111111111',
+      email: 'pat@example.test',
+      nickname: 'Pat',
+      role: 'STUDENT' as const,
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/csrf')) {
+        return jsonResponse({ token: 'csrf-test' });
+      }
+      if (url.endsWith('/api/auth/login') || url.endsWith('/api/auth/refresh')) {
+        return jsonResponse({ accessToken: 'a.b.c', expiresInSeconds: 600, user });
+      }
+      if (url.endsWith('/api/questions')) {
+        return jsonResponse(questions);
+      }
+      if (url.endsWith('/api/submissions') && init?.method === 'POST') {
+        return jsonResponse(
+          {
+            id: 'sub-claim',
+            submissionSecret: 'memory-only',
+            score: 3,
+            maxScore: 3,
+            answers: scoredAnswers([12, 27, 12]),
+          },
+          201,
+        );
+      }
+      if (url.endsWith('/claim')) {
+        const headers = new Headers(init?.headers);
+        expect(headers.get('Authorization')).toBe('Bearer a.b.c');
+        expect(headers.get('X-Submission-Secret')).toBe('memory-only');
+        return jsonResponse({
+          id: 'sub-claim',
+          studentId: user.id,
+        });
+      }
+      if (url.includes('/api/submissions/sub-claim')) {
+        expect(new Headers(init?.headers).has('X-Submission-Secret')).toBe(false);
+        return jsonResponse(pendingDetail('sub-claim'));
+      }
+      throw new Error(`unexpected ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await login({ email: 'pat@example.test', password: 'password1' });
+    renderForm();
+    await fillAndSubmit(['12', '27', '12']);
+
+    expect(await screen.findByText('Score 3 / 3')).toBeTruthy();
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          (call) => String(call[0]).endsWith('/claim') && call[1]?.method === 'POST',
+        ),
+      ).toBe(true);
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId('capability-held')).toBeNull();
     });
   });
 });

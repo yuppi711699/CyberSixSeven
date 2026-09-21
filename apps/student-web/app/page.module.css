@@ -127,3 +127,13 @@
 .preview {
   color: var(--c67-accent, #4de1c1);
 }
+
+.linkButton {
+  font: inherit;
+  color: var(--c67-accent);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}

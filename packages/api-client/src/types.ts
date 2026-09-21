@@ -49,6 +49,11 @@ export interface ApiErrorBody {
   message?: string;
 }
 
+export interface ClaimResponse {
+  id: string;
+  studentId: string;
+}
+
 export class ApiClientError extends Error {
   readonly status: number;
   readonly code: string;

@@ -4,6 +4,7 @@ import {
   ACCESSORY_POLL_INTERVAL_MS,
   ACCESSORY_POLL_TIMEOUT_MS,
   ApiClientError,
+  downloadAccessory,
   submissionQueryOptions,
   type AccessoryStatus,
 } from '@cybersixseven/api-client';
@@ -15,20 +16,25 @@ import styles from './page.module.css';
 export function AccessoryStatusPanel({
   submissionId,
   secret,
+  canDownload = false,
   pollIntervalMs = ACCESSORY_POLL_INTERVAL_MS,
   pollTimeoutMs = ACCESSORY_POLL_TIMEOUT_MS,
 }: {
   submissionId: string;
-  secret: string;
+  secret?: string | null;
+  canDownload?: boolean;
   pollIntervalMs?: number;
   pollTimeoutMs?: number;
 }) {
   const [timedOut, setTimedOut] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const startedAtRef = useRef(Date.now());
 
   const query = useQuery({
-    ...submissionQueryOptions(submissionId, secret),
-    enabled: Boolean(submissionId && secret) && !timedOut,
+    ...submissionQueryOptions(submissionId, {
+      secret,
+      enabled: Boolean(submissionId) && (Boolean(secret) || canDownload),
+    }),
     refetchInterval: (current) => {
       const status = current.state.data?.accessoryStatus;
       if (status === 'READY' || status === 'FAILED' || timedOut) {
@@ -70,38 +76,73 @@ export function AccessoryStatusPanel({
         Accessory
       </h3>
       <AccessoryBody
+        submissionId={submissionId}
         status={status}
         timedOut={timedOut}
         loading={query.isLoading}
         error={query.error}
+        canDownload={canDownload}
+        downloadError={downloadError}
         onRetry={retry}
+        onDownload={() => {
+          setDownloadError(null);
+          void downloadAccessory(submissionId).catch((caught) => {
+            setDownloadError(
+              caught instanceof ApiClientError ? caught.message : 'Download failed.',
+            );
+          });
+        }}
       />
     </section>
   );
 }
 
 function AccessoryBody({
+  submissionId,
   status,
   timedOut,
   loading,
   error,
+  canDownload,
+  downloadError,
   onRetry,
+  onDownload,
 }: {
+  submissionId: string;
   status: AccessoryStatus | undefined;
   timedOut: boolean;
   loading: boolean;
   error: unknown;
+  canDownload: boolean;
+  downloadError: string | null;
   onRetry: () => void;
+  onDownload: () => void;
 }) {
   if (status === 'READY') {
     return (
       <>
         <p className={styles.status}>Your accessory is ready.</p>
         <AccessoryPreview />
-        <Button type="button" disabled>
-          Sign in to download
-        </Button>
-        <p className={styles.status}>Download is available after you sign in.</p>
+        {canDownload ? (
+          <Button type="button" onClick={onDownload}>
+            Download accessory
+          </Button>
+        ) : (
+          <>
+            <Button type="button" disabled>
+              Sign in to download
+            </Button>
+            <p className={styles.status}>Download is available after you sign in.</p>
+          </>
+        )}
+        {downloadError ? (
+          <p className={styles.error} role="alert">
+            {downloadError}
+          </p>
+        ) : null}
+        <span hidden data-testid="submission-id">
+          {submissionId}
+        </span>
       </>
     );
   }
