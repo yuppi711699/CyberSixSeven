@@ -2,11 +2,13 @@
 
 #include <Arduino.h>
 
+#include "lcd_type.h"
+
 // 0.96" 128x64 SSD1306 over I2C. No Adafruit/U8g2 — Wire is in the Arduino core
 // and platformio.ini lib_deps stay ArduinoJson + PubSubClient only.
 
-constexpr uint8_t kOledSdaPin = 21;
-constexpr uint8_t kOledSclPin = 22;
+constexpr uint8_t kOledSdaPin = kLcdSdaPin;
+constexpr uint8_t kOledSclPin = kLcdSclPin;
 constexpr uint8_t kOledWidth = 128;
 constexpr uint8_t kOledHeight = 64;
 

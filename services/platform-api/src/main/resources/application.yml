@@ -83,7 +83,7 @@ app:
     lease-seconds: ${OUTBOX_LEASE_SECONDS:30}
     batch-size: ${OUTBOX_BATCH_SIZE:20}
   aws:
-    region: ${AWS_REGION:us-east-1}
+    region: ${AWS_REGION:us-west-2}
     endpoint: ${AWS_ENDPOINT:}
     sns-topic-arn: ${SNS_SUBMISSION_EVENTS_TOPIC_ARN:}
     s3:

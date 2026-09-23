@@ -11,7 +11,7 @@ spring:
 
 app:
   aws:
-    region: us-east-1
+    region: us-west-2
     endpoint: http://127.0.0.1:1
     access-key: test
     secret-key: test

@@ -4,7 +4,7 @@
 # accessories bucket. docker compose down -v && up must restore everything.
 set -euo pipefail
 
-REGION="${AWS_REGION:-us-east-1}"
+REGION="${AWS_REGION:-us-west-2}"
 TOPIC_NAME="submission-events"
 TABLE_NAME="device_events"
 BUCKET_NAME="cybersixseven-accessories"

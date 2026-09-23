@@ -8,7 +8,7 @@ alwaysApply: false
 
 - `required_version = ">= 1.16"` (local is 1.16.2), `hashicorp/aws` at `~> 6.64`. Commit `.terraform.lock.hcl` — an uncommitted lock means CI resolves a different provider than local and the plans disagree.
 - **AWS provider 6.x is a major bump.** Most HCL in tutorials, blog posts and your own recall is v3/v4-era and will not apply. A wrong-but-plausible attribute fails partway through `apply`, after half the stack exists and while state already holds the other half — the most expensive failure mode in this whole repo. When you are unsure of an argument name, say so and stop; do not guess.
-- v6 makes `region` a per-resource argument. Keep one `provider "aws"` block; add an aliased provider only when a resource genuinely needs another region. The ALB's ACM cert belongs in the **ALB's own region** — the us-east-1 rule is CloudFront-only, and copying it here produces a cert the listener cannot attach.
+- v6 makes `region` a per-resource argument. Keep one `provider "aws"` block; add an aliased provider only when a resource genuinely needs another region. The ALB's ACM cert belongs in the **ALB's own region** — the us-west-2 rule is CloudFront-only, and copying it here produces a cert the listener cannot attach.
 
 ## S3: the single most-copied v6 breakage
 

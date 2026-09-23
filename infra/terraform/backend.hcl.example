@@ -13,6 +13,6 @@
 
 bucket         = "cybersixseven-tfstate"
 key            = "auth-preview/terraform.tfstate"
-region         = "us-east-1"
+region         = "us-west-2"
 dynamodb_table = "cybersixseven-tf-locks"
 encrypt        = true

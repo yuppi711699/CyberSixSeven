@@ -1,5 +1,5 @@
 ---
-description: ESP32 firmware rules for CyberSixSeven — PlatformIO pins, ArduinoJson v7 (not v6), PubSubClient buffer sizing, clock-before-TLS, non-blocking reconnect, secrets handling, and the encouraging-feedback product rule
+description: ESP32 firmware rules for CyberSixSeven — PlatformIO pins, LCD type envs (C67_LCD_TYPE), ArduinoJson v7 (not v6), PubSubClient buffer sizing, clock-before-TLS, non-blocking reconnect, secrets handling, and the encouraging-feedback product rule
 globs: firmware/esp32/**
 alwaysApply: false
 ---
@@ -47,6 +47,18 @@ alwaysApply: false
 
 - The `"incorrect"` reaction must be **gentle and encouraging**: a soft LED pattern and a soft or rising tone. No harsh error buzz, no red flash, no descending "wrong" tone. A punishing failure sound is a product defect here, not a stylistic choice — the whole point is that a student wants to try again.
 - Scale `intensity` into the LED/motor pattern, and clamp it to a safe range rather than trusting the value on the wire.
+- LCD reactions follow the same rule: no “WRONG”, no X, no frown. 1602 copy is `almost there` / `try once more`. A new panel gets an encouraging clip, not a fail state.
+
+## LCD type — compile-time env, not secrets.h
+
+- Display is `-D C67_LCD_TYPE=<int>` on a PlatformIO env. Integers so `#if` works. Do **not** put `LCD_TYPE` in `secrets.h` and do **not** pass a string to `-D`.
+- Registry lives in `src/lcd_type.h` **and** `platformio.ini` (they must match): `1` = 0.96" SSD1306 128×64 (`[env:esp32dev]`, default), `2` = HD44780 1602 + PCF8574 backpack (`[env:esp32dev-lcd1602]`). Next panel is `3`.
+- `extends = env:esp32dev` **replaces** `build_flags`; repeat `-D MQTT_MAX_PACKET_SIZE=512` on every LCD env.
+- I2C default is SDA **21** / SCL **22** (`kLcdSdaPin` / `kLcdSclPin`). One panel on the bus. VCC is per-module (SSD1306 usually 3.3 V, 1602 backpack **5 V**).
+- Driver is a `src/<chip>.cpp` over Arduino `Wire`. **No new `lib_deps`** (no Adafruit, U8g2, LiquidCrystal_I2C). `lib_deps` stay ArduinoJson 7.4.3 + PubSubClient 2.8.
+- Dispatch is `#if C67_LCD_TYPE == …` in `face.cpp`: `faceBegin`, `facePlayHappy`, `facePlayEncourage`, `faceUpdate`, `faceLcdName()`. `delay()` only in `Begin()` (setup). `faceUpdate` is `millis()`-driven.
+- Adding a panel: next int in `lcd_type.h` → new `[env:esp32dev-…]` → driver → `face.cpp` branches → wiring + env + serial probe line in `firmware/esp32/README.md` → `pio run -e esp32dev -e esp32dev-lcd1602 -e <new>`.
+- Default `pio run` is SSD1306. A 1602 (or type 3) board flashed without `-e` looks like a dead panel.
 
 ## Secrets and memory hygiene
 

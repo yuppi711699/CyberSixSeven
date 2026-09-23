@@ -13,7 +13,7 @@
 #include <time.h>
 
 #include "face.h"
-#include "ssd1306.h"
+#include "lcd_type.h"
 #include "../secrets.h"
 
 #ifndef C67_SECRETS_HAS_MQTT
@@ -420,13 +420,14 @@ void setup() {
 
   Serial.println();
   Serial.println("[boot] CyberSixSeven ESP32 firmware v0.3");
-  Serial.printf("[boot] device=%s led=%u buzzer=%u motor=%u oled sda=%u scl=%u\n",
+  Serial.printf("[boot] device=%s lcd=%s led=%u buzzer=%u motor=%u sda=%u scl=%u\n",
                 DEVICE_ID,
+                faceLcdName(),
                 static_cast<unsigned>(kLedPin),
                 static_cast<unsigned>(kBuzzerPin),
                 static_cast<unsigned>(kMotorPin),
-                static_cast<unsigned>(kOledSdaPin),
-                static_cast<unsigned>(kOledSclPin));
+                static_cast<unsigned>(kLcdSdaPin),
+                static_cast<unsigned>(kLcdSclPin));
 
   faceBegin();
   loadRing();

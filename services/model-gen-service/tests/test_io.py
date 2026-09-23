@@ -31,7 +31,7 @@ def test_accessory_key_rejects_non_uuid() -> None:
 @pytest.fixture
 def s3_io(submission_id: str):
     with mock_aws():
-        s3 = boto3.client("s3", region_name="us-east-1")
+        s3 = boto3.client("s3", region_name="us-west-2")
         s3.create_bucket(Bucket="cybersixseven-accessories")
         calls: list[tuple[str, str]] = []
 

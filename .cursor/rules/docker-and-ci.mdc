@@ -15,7 +15,7 @@ alwaysApply: false
 
 ## LocalStack
 
-- Every container that touches AWS — and LocalStack itself — gets `AWS_ACCESS_KEY_ID=test`, `AWS_SECRET_ACCESS_KEY=test`, `AWS_REGION=us-east-1`. Without them the SDK aborts at startup with "Unable to load credentials" on any machine with no AWS profile. That is not a code defect and must not be chased in application code.
+- Every container that touches AWS — and LocalStack itself — gets `AWS_ACCESS_KEY_ID=test`, `AWS_SECRET_ACCESS_KEY=test`, `AWS_REGION=us-west-2`. Without them the SDK aborts at startup with "Unable to load credentials" on any machine with no AWS profile. That is not a code defect and must not be chased in application code.
 - Queues, topics, buckets and tables are created by an **init script** mounted into `/etc/localstack/init/ready.d/` (executable bit set, `awslocal`, written to be re-runnable). Never create one with `docker compose exec`, and never leave a manual step in a README: `docker compose down -v` followed by `up` has to restore the whole environment unattended.
 - That script owns: the `device-commands` queue + its DLQ, the `model-gen-jobs` queue + its DLQ, the `submission-events` topic with both subscriptions set to `RawMessageDelivery=true`, the `device_events` DynamoDB table, and the `cybersixseven-accessories` bucket. It is the local mirror of the Terraform resource set — when one changes, change both.
 

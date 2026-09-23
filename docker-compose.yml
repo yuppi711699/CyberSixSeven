@@ -41,8 +41,8 @@ services:
     environment:
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
-      AWS_DEFAULT_REGION: us-east-1
-      AWS_REGION: us-east-1
+      AWS_DEFAULT_REGION: us-west-2
+      AWS_REGION: us-west-2
       SERVICES: sns,sqs,dynamodb,s3
     volumes:
       - ./infra/local/localstack/init-aws.sh:/etc/localstack/init/ready.d/init-aws.sh

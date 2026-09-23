@@ -36,7 +36,7 @@ The developer is a strong React/TypeScript engineer and a **beginner on the JVM*
 
 ## Local AWS
 - **LocalStack is the only AWS emulator.** Do not also run `amazon/dynamodb-local` — one endpoint, less RAM, fewer traps.
-- Set `AWS_ACCESS_KEY_ID=test`, `AWS_SECRET_ACCESS_KEY=test`, `AWS_REGION=us-east-1`, or the SDK fails with "Unable to load credentials".
+- Set `AWS_ACCESS_KEY_ID=test`, `AWS_SECRET_ACCESS_KEY=test`, `AWS_REGION=us-west-2`, or the SDK fails with "Unable to load credentials".
 - Queues, topics, buckets and tables come from a re-runnable init script, never a hand-typed command.
 
 ## Secrets

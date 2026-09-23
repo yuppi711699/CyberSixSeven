@@ -35,9 +35,9 @@ def _fake_stl() -> Path:
 @pytest.fixture
 def stack():
     with mock_aws():
-        s3 = boto3.client("s3", region_name="us-east-1")
+        s3 = boto3.client("s3", region_name="us-west-2")
         s3.create_bucket(Bucket="cybersixseven-accessories")
-        sqs = boto3.client("sqs", region_name="us-east-1")
+        sqs = boto3.client("sqs", region_name="us-west-2")
         dlq_url = sqs.create_queue(QueueName="model-gen-jobs-dlq")["QueueUrl"]
         dlq_arn = sqs.get_queue_attributes(QueueUrl=dlq_url, AttributeNames=["QueueArn"])["Attributes"][
             "QueueArn"

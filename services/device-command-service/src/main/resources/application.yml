@@ -20,7 +20,7 @@ spring.grpc.server.port: 9090
 
 app:
   aws:
-    region: ${AWS_REGION:us-east-1}
+    region: ${AWS_REGION:us-west-2}
     endpoint: ${AWS_ENDPOINT:}
     access-key: ${AWS_ACCESS_KEY_ID:test}
     secret-key: ${AWS_SECRET_ACCESS_KEY:test}

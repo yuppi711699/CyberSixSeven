@@ -115,7 +115,7 @@ class AccessoryIo:
 
 def io_from_env() -> AccessoryIo:
     endpoint = os.environ.get("AWS_ENDPOINT_URL") or os.environ.get("AWS_ENDPOINT") or None
-    region = os.environ.get("AWS_REGION", "us-east-1")
+    region = os.environ.get("AWS_REGION", "us-west-2")
     connect = float(os.environ.get("AWS_CONNECT_TIMEOUT_SECONDS", "2"))
     read = float(os.environ.get("AWS_READ_TIMEOUT_SECONDS", "30"))
     bucket = os.environ.get("ACCESSORY_BUCKET", BUCKET)

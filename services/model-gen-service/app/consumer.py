@@ -98,7 +98,7 @@ def poll_forever(io: AccessoryIo | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     queue_url = os.environ["MODEL_GEN_QUEUE_URL"]
     endpoint = os.environ.get("AWS_ENDPOINT_URL") or os.environ.get("AWS_ENDPOINT") or None
-    region = os.environ.get("AWS_REGION", "us-east-1")
+    region = os.environ.get("AWS_REGION", "us-west-2")
     visibility = int(os.environ.get("MODEL_GEN_VISIBILITY_TIMEOUT_SECONDS", "300"))
     accessory_io = io if io is not None else io_from_env()
     sqs = aws_client(

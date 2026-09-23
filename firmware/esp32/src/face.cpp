@@ -1,10 +1,50 @@
 #include "face.h"
 
+#include "lcd_type.h"
+
+#if C67_LCD_TYPE == C67_LCD_LCD1602
+#include "lcd1602.h"
+#else
 #include "ssd1306.h"
+#endif
 
 namespace {
 
 enum class FaceMode : uint8_t { Idle, Happy, Encourage };
+
+FaceMode mode = FaceMode::Idle;
+uint32_t modeStartedAtMs = 0;
+uint32_t modeDurationMs = 0;
+uint32_t lastFrameAtMs = 0;
+
+#if C67_LCD_TYPE == C67_LCD_LCD1602
+
+constexpr uint32_t kFrameMs = 400;
+
+bool displayReady() {
+  return lcd1602Ready();
+}
+
+void showIdle(uint32_t now, bool mqttReady) {
+  if (mqttReady) {
+    lcd1602SetLines("CyberSixSeven", "ready");
+    return;
+  }
+  const uint8_t step = static_cast<uint8_t>((now / 400) % 4);
+  const char* dots =
+      step == 0 ? "linking" : step == 1 ? "linking." : step == 2 ? "linking.." : "linking...";
+  lcd1602SetLines("CyberSixSeven", dots);
+}
+
+void showHappy() {
+  lcd1602SetLines(":)  NICE WORK!", "you got it");
+}
+
+void showEncourage() {
+  lcd1602SetLines("almost there", "try once more");
+}
+
+#else
 
 constexpr int16_t kLeftCx = 38;
 constexpr int16_t kRightCx = 90;
@@ -16,10 +56,6 @@ constexpr uint32_t kBlinkMs = 140;
 constexpr uint32_t kLookHoldMinMs = 900;
 constexpr uint32_t kLookHoldMaxMs = 2200;
 
-FaceMode mode = FaceMode::Idle;
-uint32_t modeStartedAtMs = 0;
-uint32_t modeDurationMs = 0;
-uint32_t lastFrameAtMs = 0;
 uint32_t nextBlinkAtMs = 800;
 uint32_t blinkStartedAtMs = 0;
 bool blinking = false;
@@ -29,6 +65,10 @@ int8_t lookTargetX = 0;
 int8_t lookTargetY = 0;
 uint32_t lookStartedAtMs = 0;
 uint32_t nextLookAtMs = 400;
+
+bool displayReady() {
+  return ssd1306Ready();
+}
 
 int16_t clamp16(int16_t v, int16_t lo, int16_t hi) {
   if (v < lo) {
@@ -65,7 +105,6 @@ void sparkle(int16_t x, int16_t y, uint32_t now) {
 }
 
 void drawSmile(int16_t cy) {
-  // Shallow U under the eyes. Pixel arc, no trig.
   const int16_t mid = 64;
   for (int16_t x = -18; x <= 18; ++x) {
     const int16_t y = static_cast<int16_t>(cy + (x * x) / 48);
@@ -87,13 +126,11 @@ void drawOpenEye(int16_t cx, int16_t cy, int8_t pupilX, int8_t pupilY, int16_t l
 }
 
 void drawHappyEye(int16_t cx, int16_t cy) {
-  // Bottom crescent: white disc minus a disc shifted up. Reads as a smile-squint.
   ssd1306FillCircle(cx, cy, kEyeR - 2, true);
   ssd1306FillCircle(cx, cy - 9, kEyeR - 2, false);
 }
 
 void drawEncourageEye(int16_t cx, int16_t cy, int8_t pupilX, int8_t pupilY, int16_t lidClose) {
-  // Slightly smaller, hopeful — not an X, not a frown.
   ssd1306FillCircle(cx, cy, kEyeR - 2, true);
   const int16_t px = clamp16(cx + pupilX, cx - 5, cx + 5);
   const int16_t py = clamp16(cy + pupilY - 2, cy - 5, cy + 3);
@@ -150,7 +187,7 @@ void drawIdle(uint32_t now, bool mqttReady) {
   const int16_t ly = currentLook(lookY, lookTargetY, now);
   int16_t lid = blinkLid(now);
   if (!mqttReady && lid < 10) {
-    lid = 10;  // half-awake while linking
+    lid = 10;
   }
   drawOpenEye(kLeftCx, kEyeCy, static_cast<int8_t>(lx), static_cast<int8_t>(ly), lid);
   drawOpenEye(kRightCx, kEyeCy, static_cast<int8_t>(lx), static_cast<int8_t>(ly), lid);
@@ -180,61 +217,102 @@ void drawEncourage(uint32_t now) {
   drawEncourageEye(static_cast<int16_t>(kRightCx + sway), kEyeCy, 0, -2, lid);
 }
 
+#endif
+
 }  // namespace
 
+const char* faceLcdName() {
+#if C67_LCD_TYPE == C67_LCD_LCD1602
+  return "lcd1602";
+#else
+  return "ssd1306";
+#endif
+}
+
 void faceBegin() {
+#if C67_LCD_TYPE == C67_LCD_LCD1602
+  if (!lcd1602Begin()) {
+    return;
+  }
+  Serial.printf("[lcd] hd44780 16x2 addr=0x%02X sda=%u scl=%u\n",
+                static_cast<unsigned>(lcd1602Address()),
+                static_cast<unsigned>(kLcdSdaPin),
+                static_cast<unsigned>(kLcdSclPin));
+#else
   if (!ssd1306Begin()) {
     Serial.println("[oled] not found on 0x3C/0x3D — check VCC/GND/SDA=21/SCL=22");
     return;
   }
   Serial.printf("[oled] ssd1306 128x64 addr=0x%02X sda=%u scl=%u\n",
                 static_cast<unsigned>(ssd1306Address()),
-                static_cast<unsigned>(kOledSdaPin),
-                static_cast<unsigned>(kOledSclPin));
+                static_cast<unsigned>(kLcdSdaPin),
+                static_cast<unsigned>(kLcdSclPin));
   const uint32_t now = millis();
   nextBlinkAtMs = now + 600;
   nextLookAtMs = now + 200;
+#endif
   lastFrameAtMs = 0;
-  // Prove the panel immediately. MQTT happy-face is the same clip.
   facePlayHappy(2);
 }
 
 void facePlayHappy(uint8_t intensity) {
-  if (!ssd1306Ready()) {
+  if (!displayReady()) {
     return;
   }
   mode = FaceMode::Happy;
   modeStartedAtMs = millis();
   modeDurationMs = 900u + 280u * intensity;
+  lastFrameAtMs = 0;
+#if C67_LCD_TYPE != C67_LCD_LCD1602
   blinking = false;
+#endif
 }
 
 void facePlayEncourage(uint8_t intensity) {
-  if (!ssd1306Ready()) {
+  if (!displayReady()) {
     return;
   }
   mode = FaceMode::Encourage;
   modeStartedAtMs = millis();
   modeDurationMs = 800u + 220u * intensity;
+  lastFrameAtMs = 0;
+#if C67_LCD_TYPE != C67_LCD_LCD1602
   blinking = false;
   nextBlinkAtMs = modeStartedAtMs + 180;
+#endif
 }
 
 void faceUpdate(uint32_t now, bool mqttReady) {
-  if (!ssd1306Ready()) {
+  if (!displayReady()) {
     return;
+  }
+  if (mode != FaceMode::Idle && now - modeStartedAtMs >= modeDurationMs) {
+    mode = FaceMode::Idle;
+    lastFrameAtMs = 0;
+#if C67_LCD_TYPE != C67_LCD_LCD1602
+    nextBlinkAtMs = now + 400;
+    nextLookAtMs = now + 200;
+#endif
   }
   if (lastFrameAtMs != 0 && now - lastFrameAtMs < kFrameMs) {
     return;
   }
   lastFrameAtMs = now;
 
-  if (mode != FaceMode::Idle && now - modeStartedAtMs >= modeDurationMs) {
-    mode = FaceMode::Idle;
-    nextBlinkAtMs = now + 400;
-    nextLookAtMs = now + 200;
+#if C67_LCD_TYPE == C67_LCD_LCD1602
+  switch (mode) {
+    case FaceMode::Happy:
+      showHappy();
+      break;
+    case FaceMode::Encourage:
+      showEncourage();
+      break;
+    case FaceMode::Idle:
+    default:
+      showIdle(now, mqttReady);
+      break;
   }
-
+#else
   ssd1306Clear();
   switch (mode) {
     case FaceMode::Happy:
@@ -249,4 +327,5 @@ void faceUpdate(uint32_t now, bool mqttReady) {
       break;
   }
   ssd1306Display();
+#endif
 }
