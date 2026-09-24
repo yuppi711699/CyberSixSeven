@@ -1,0 +1,30 @@
+// Shared compiler options for every workspace. Each app/package extends this
+// and adds only its own `include` plus anything framework-specific.
+//
+// TypeScript version: 5.9.3, NOT the 7.0.2 pinned in documents/05-tech-stack.md §7.
+// That document pre-authorises this exact fallback -- "If typescript-eslint or
+// another tool misbehaves, fall back to the 5.x line and note it" -- and it
+// misbehaves hard: typescript-eslint 8.70.0 (the newest release; there is no 9.x)
+// throws "typescript-eslint does not support TS 7.0" at import time, so ESLint
+// cannot load at all. ESLint 10 has no TypeScript parser of its own, so the
+// choice was TS 7 with zero lint coverage on .ts/.tsx, or TS 5.9.3 with real
+// lint coverage. Revert to 7.0.2 the moment typescript-eslint ships TS >= 7.1
+// support (tracked at typescript-eslint/typescript-eslint#10940).
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "preserve",
+    "strict": true,
+    "noEmit": true,
+    "allowJs": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true,
+    "incremental": true
+  }
+}

@@ -1,0 +1,219 @@
+{
+  "info": {
+    "_postman_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "name": "CyberSixSeven Services",
+    "description": "HTTP APIs currently exposed under services/.\n\nPorts (fixed):\n- platform-api: 8080\n- device-command-service: 8081 (gRPC on 9090 — not in this collection)\n- model-gen-service: 8000\n\nSeed question UUIDs from V1 migration are prefilled for submissions.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "platformApi", "value": "http://localhost:8080" },
+    { "key": "deviceCommandApi", "value": "http://localhost:8081" },
+    { "key": "modelGenApi", "value": "http://localhost:8000" },
+    { "key": "robotId", "value": "" },
+    {
+      "key": "questionId1",
+      "value": "00000000-0000-0000-0000-000000000001"
+    },
+    {
+      "key": "questionId2",
+      "value": "00000000-0000-0000-0000-000000000002"
+    },
+    {
+      "key": "questionId3",
+      "value": "00000000-0000-0000-0000-000000000003"
+    }
+  ],
+  "item": [
+    {
+      "name": "platform-api",
+      "item": [
+        {
+          "name": "Health",
+          "item": [
+            {
+              "name": "GET actuator health",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{platformApi}}/actuator/health"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Questions",
+          "item": [
+            {
+              "name": "GET list questions",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{platformApi}}/api/questions"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Submissions",
+          "item": [
+            {
+              "name": "POST create submission",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"answers\": [\n    { \"questionId\": \"{{questionId1}}\", \"answer\": 12 },\n    { \"questionId\": \"{{questionId2}}\", \"answer\": 27 },\n    { \"questionId\": \"{{questionId3}}\", \"answer\": 12 }\n  ]\n}"
+                },
+                "url": "{{platformApi}}/api/submissions",
+                "description": "Expect 201. Correct answers for seed questions: 12, 27, 12."
+              }
+            },
+            {
+              "name": "POST create submission (invalid — extra field)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"answers\": [\n    { \"questionId\": \"{{questionId1}}\", \"answer\": 12 }\n  ],\n  \"score\": 999\n}"
+                },
+                "url": "{{platformApi}}/api/submissions",
+                "description": "Expect 400 — fail-on-unknown-properties rejects client-supplied score."
+              }
+            }
+          ]
+        },
+        {
+          "name": "Robots",
+          "item": [
+            {
+              "name": "GET list robots",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{platformApi}}/api/robots"
+              }
+            },
+            {
+              "name": "POST create robot",
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "if (pm.response.code === 201) {",
+                      "  const body = pm.response.json();",
+                      "  if (body.id) {",
+                      "    pm.collectionVariables.set('robotId', body.id);",
+                      "  }",
+                      "}"
+                    ]
+                  }
+                }
+              ],
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"R2\",\n  \"model\": \"astromech\"\n}"
+                },
+                "url": "{{platformApi}}/api/robots",
+                "description": "Expect 201. Saves `id` into collection variable `robotId` for later requests."
+              }
+            },
+            {
+              "name": "GET robot by id",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{platformApi}}/api/robots/{{robotId}}",
+                "description": "Run POST create robot first (or set robotId manually)."
+              }
+            },
+            {
+              "name": "PUT update robot",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"R2-D2\",\n  \"model\": \"astromech\"\n}"
+                },
+                "url": "{{platformApi}}/api/robots/{{robotId}}"
+              }
+            },
+            {
+              "name": "DELETE robot",
+              "request": {
+                "method": "DELETE",
+                "header": [],
+                "url": "{{platformApi}}/api/robots/{{robotId}}",
+                "description": "Expect 204 No Content."
+              }
+            },
+            {
+              "name": "GET robot by id (404)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": "{{platformApi}}/api/robots/00000000-0000-0000-0000-000000000099",
+                "description": "Expect 404 for a non-existent UUID."
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "device-command-service",
+      "item": [
+        {
+          "name": "GET actuator health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{deviceCommandApi}}/actuator/health",
+            "description": "HTTP surface is health only for now. Product RPCs are gRPC on :9090."
+          }
+        }
+      ]
+    },
+    {
+      "name": "model-gen-service",
+      "item": [
+        {
+          "name": "GET health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{modelGenApi}}/health",
+            "description": "Expect {\"status\":\"ok\"}."
+          }
+        }
+      ]
+    }
+  ]
+}

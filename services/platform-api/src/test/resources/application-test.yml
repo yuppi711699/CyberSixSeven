@@ -1,0 +1,61 @@
+app:
+  fixtures:
+    enabled: true
+    teacher-email: teacher@example.test
+    teacher-password: teacher-pass-1
+    teacher-nickname: Teacher
+    admin-email: admin@example.test
+    admin-password: admin-pass-1
+    admin-nickname: Admin
+  product-enabled: true
+  internal-api-key: test-internal-api-key
+  devices:
+    demo-device-id: esp32-dev-001
+  jwt:
+    secret: test-jwt-secret-that-is-at-least-32b
+    ttl: 10m
+    issuer: https://api.aiastrologyperdictions.com
+  auth:
+    cookie-secure: true
+    refresh-ttl: 14d
+    exchange-ttl: 60s
+  frontends:
+    student-origin: http://localhost:3000
+    admin-origin: http://localhost:3001
+  oauth:
+    fixture:
+      enabled: true
+  grpc:
+    device-command:
+      connect-timeout: 500ms
+      deadline: 2s
+  aws:
+    region: us-west-2
+    endpoint: http://127.0.0.1:1
+    sns-topic-arn: arn:aws:sns:us-west-2:000000000000:submission-events
+    s3:
+      bucket: cybersixseven-accessories
+      presign-ttl: 5m
+
+spring:
+  grpc:
+    client:
+      channel:
+        device-command:
+          target: static://127.0.0.1:9
+          default:
+            deadline: 2s
+  task:
+    scheduling:
+      enabled: false
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: test-google-client-id
+            client-secret: test-google-client-secret
+            scope:
+              - openid
+              - profile
+              - email

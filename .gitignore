@@ -8,7 +8,9 @@ documents/
 *.pem
 *.key
 *.crt
-firmware/esp32/secrets.h
+*.csr
+*.srl
+secrets.h
 
 # JVM / Maven
 target/
@@ -44,5 +46,6 @@ crash.log
 *.stl
 
 # OS / editor
-.DS_Store
-*.log
+playwright-report/
+test-results/
+blob-report/

@@ -1,0 +1,27 @@
+{
+  "name": "cybersixseven",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.26.0",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "format": "prettier --write \"apps/**/*.{ts,tsx,css,json,md}\" \"packages/**/*.{ts,tsx,css,json,md}\"",
+    "format:check": "prettier --check \"apps/**/*.{ts,tsx,css,json,md}\" \"packages/**/*.{ts,tsx,css,json,md}\"",
+    "e2e": "playwright test --project=chromium"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.10.0",
+    "prettier": "3.9.6",
+    "turbo": "2.10.12",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.70.0",
+    "@playwright/test": "1.63.0"
+  }
+}

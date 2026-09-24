@@ -1,0 +1,4 @@
+# Cloud v0.5 profile: health/auth/OAuth/CSRF only. Product routes stay off
+# until v0.8 provisions SNS/SQS/S3 and the remaining services.
+app:
+  product-enabled: false
