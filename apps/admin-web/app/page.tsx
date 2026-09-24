@@ -1,6 +1,7 @@
 'use client';
 
 import { isProductEnabled, useAuth } from '@cybersixseven/auth-client';
+import { Button, Card } from '@cybersixseven/ui';
 import Link from 'next/link';
 import styles from './page.module.css';
 
@@ -25,16 +26,27 @@ export default function AdminHomePage() {
           <p className={styles.error} role="alert">
             Student accounts cannot use the admin app.
           </p>
-          <button type="button" className={styles.linkButton} onClick={() => void logout()}>
+          <Button type="button" variant="secondary" onClick={() => void logout()}>
             Log out
-          </button>
+          </Button>
         </section>
       ) : !isProductEnabled() ? (
         <p className={styles.status} role="status">
           Admin product tools are unavailable until the v0.8 backend smoke gate.
         </p>
       ) : (
-        <p className={styles.status}>Question CRUD and device tools arrive in v0.6.</p>
+        <Card>
+          <p className={styles.status}>Question bank, submissions, leaderboard, and devices.</p>
+          <p className={styles.status}>
+            <Link href="/questions">Questions</Link>
+            {' · '}
+            <Link href="/submissions">Submissions</Link>
+            {' · '}
+            <Link href="/leaderboard">Leaderboard</Link>
+            {' · '}
+            <Link href="/devices">Devices</Link>
+          </p>
+        </Card>
       )}
     </main>
   );

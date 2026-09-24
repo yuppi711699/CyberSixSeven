@@ -9,13 +9,14 @@
 
 #define C67_LCD_SSD1306 1
 #define C67_LCD_LCD1602 2
-// Next panel: 3. Do not reuse 1 or 2. Add the env + README registry row in the same change.
+// Type 2: PCF8574A (0x38-0x3F, default 0x3F) / PCF8574 (0x20-0x27) backpack,
+// then Gravity DFR0464 only if 0x3E AND RGB both ACK. Next panel: 3.
 
 #ifndef C67_LCD_TYPE
 #define C67_LCD_TYPE C67_LCD_SSD1306
 #endif
 
-// Both panels share the DevKit I2C pins. 1602 backpacks want 5 V on VCC;
-// the SSD1306 module is usually 3.3 V. SDA/SCL stay 3.3 V either way.
+// Both panels share the DevKit I2C pins. Gravity DFR0464 accepts 3.3–5 V;
+// PCF8574 backpacks want 5 V. SDA/SCL stay 3.3 V either way.
 constexpr uint8_t kLcdSdaPin = 21;
 constexpr uint8_t kLcdSclPin = 22;

@@ -25,6 +25,10 @@ app:
   oauth:
     fixture:
       enabled: true
+  grpc:
+    device-command:
+      connect-timeout: 500ms
+      deadline: 2s
   aws:
     region: us-west-2
     endpoint: http://127.0.0.1:1
@@ -34,6 +38,13 @@ app:
       presign-ttl: 5m
 
 spring:
+  grpc:
+    client:
+      channel:
+        device-command:
+          target: static://127.0.0.1:9
+          default:
+            deadline: 2s
   task:
     scheduling:
       enabled: false

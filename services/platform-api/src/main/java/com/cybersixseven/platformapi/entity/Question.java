@@ -82,4 +82,13 @@ public class Question {
     public Instant getCreatedAt() {
         return createdAt;
     }
+
+    public void update(
+            String prompt, List<Integer> options, int correctAnswer, int maxPoints, int displayOrder) {
+        this.prompt = prompt;
+        this.options = List.copyOf(options);
+        this.correctAnswer = correctAnswer;
+        this.maxPoints = maxPoints;
+        this.displayOrder = displayOrder;
+    }
 }

@@ -2,7 +2,7 @@
 
 import { ApiClientError } from '@cybersixseven/api-client';
 import { googleAuthorizationUrl, login } from '@cybersixseven/auth-client';
-import { Button } from '@cybersixseven/ui';
+import { Button, Input } from '@cybersixseven/ui';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { type FormEvent, useState } from 'react';
@@ -38,8 +38,7 @@ export default function AdminLoginPage() {
       <form className={styles.form} onSubmit={(event) => void onSubmit(event)}>
         <label className={styles.label}>
           Email
-          <input
-            className={styles.input}
+          <Input
             type="email"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
@@ -48,8 +47,7 @@ export default function AdminLoginPage() {
         </label>
         <label className={styles.label}>
           Password
-          <input
-            className={styles.input}
+          <Input
             type="password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}

@@ -2,6 +2,13 @@ server:
   port: 8080
 
 spring:
+  grpc:
+    client:
+      channel:
+        device-command:
+          target: ${DEVICE_COMMAND_GRPC_TARGET:static://127.0.0.1:9090}
+          default:
+            deadline: 2s
   application:
     name: platform-api
   datasource:
@@ -78,6 +85,10 @@ app:
       enabled: ${APP_OAUTH_FIXTURE_ENABLED:false}
   command:
     default-intensity: 3
+  grpc:
+    device-command:
+      connect-timeout: 2s
+      deadline: 2s
   outbox:
     poll-interval-ms: ${OUTBOX_POLL_INTERVAL_MS:2000}
     lease-seconds: ${OUTBOX_LEASE_SECONDS:30}

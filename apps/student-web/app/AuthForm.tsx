@@ -2,7 +2,7 @@
 
 import { ApiClientError } from '@cybersixseven/api-client';
 import { googleAuthorizationUrl, login, register } from '@cybersixseven/auth-client';
-import { Button } from '@cybersixseven/ui';
+import { Button, Input } from '@cybersixseven/ui';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { type FormEvent, useState } from 'react';
@@ -46,8 +46,7 @@ export function AuthForm({
       {registerMode ? (
         <label className={styles.label}>
           Nickname
-          <input
-            className={styles.input}
+          <Input
             value={nickname}
             onChange={(event) => setNickname(event.target.value)}
             required
@@ -56,8 +55,7 @@ export function AuthForm({
       ) : null}
       <label className={styles.label}>
         Email
-        <input
-          className={styles.input}
+        <Input
           type="email"
           value={email}
           onChange={(event) => setEmail(event.target.value)}
@@ -66,8 +64,7 @@ export function AuthForm({
       </label>
       <label className={styles.label}>
         Password
-        <input
-          className={styles.input}
+        <Input
           type="password"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
@@ -84,13 +81,9 @@ export function AuthForm({
         {pending ? 'Working…' : registerMode ? 'Create account' : 'Sign in'}
       </Button>
       {mode === 'student' ? (
-        <button
-          type="button"
-          className={styles.linkButton}
-          onClick={() => setRegisterMode((current) => !current)}
-        >
+        <Button type="button" variant="secondary" onClick={() => setRegisterMode((current) => !current)}>
           {registerMode ? 'Already have an account? Sign in' : 'Need an account? Register'}
-        </button>
+        </Button>
       ) : null}
       <Button
         type="button"

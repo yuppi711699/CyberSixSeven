@@ -9,7 +9,7 @@ import {
   type Question,
 } from '@cybersixseven/api-client';
 import { useAuth } from '@cybersixseven/auth-client';
-import { Button } from '@cybersixseven/ui';
+import { Button, Card, Input } from '@cybersixseven/ui';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { type FormEvent, useState } from 'react';
 import { toSubmissionAnswers, validateAnswers } from './validation';
@@ -168,7 +168,7 @@ function QuestionField({
   const errorId = `${inputId}-error`;
 
   return (
-    <article className={styles.card} aria-labelledby={`prompt-${question.id}`}>
+    <Card className={styles.card} aria-labelledby={`prompt-${question.id}`}>
       <p className={styles.eyebrow}>
         Question {index + 1} of {total}
       </p>
@@ -178,9 +178,8 @@ function QuestionField({
       <label className={styles.label} htmlFor={inputId}>
         Your answer
       </label>
-      <input
+      <Input
         id={inputId}
-        className={styles.input}
         inputMode="numeric"
         pattern="-?[0-9]*"
         value={value}
@@ -194,6 +193,6 @@ function QuestionField({
           {error}
         </p>
       ) : null}
-    </article>
+    </Card>
   );
 }

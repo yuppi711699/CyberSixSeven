@@ -1,6 +1,7 @@
 'use client';
 
 import { isProductEnabled, useAuth } from '@cybersixseven/auth-client';
+import { Button } from '@cybersixseven/ui';
 import Link from 'next/link';
 import { QuestionForm } from './QuestionForm';
 import styles from './page.module.css';
@@ -16,9 +17,9 @@ export default function HomePage() {
         {user ? (
           <p className={styles.status}>
             Signed in as {user.nickname}{' '}
-            <button type="button" className={styles.linkButton} onClick={() => void logout()}>
+            <Button type="button" variant="secondary" onClick={() => void logout()}>
               Log out
-            </button>
+            </Button>
           </p>
         ) : null}
       </header>

@@ -21,6 +21,7 @@
     <module>contracts</module>
     <module>platform-api</module>
     <module>device-command-service</module>
+    <module>reward-service</module>
   </modules>
 
   <properties>

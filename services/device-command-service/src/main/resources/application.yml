@@ -40,3 +40,10 @@ app:
     internal-api-key: ${INTERNAL_API_KEY:}
     connect-timeout-ms: 2000
     read-timeout-ms: 5000
+  reward:
+    base-url: ${REWARD_SERVICE_BASE_URL:http://127.0.0.1:8082}
+    internal-api-key: ${INTERNAL_API_KEY:}
+    connect-timeout-ms: 500
+    read-timeout-ms: 500
+  grpc:
+    internal-api-key: ${INTERNAL_API_KEY:}

@@ -7,11 +7,19 @@ export {
 } from './config';
 export {
   claimSubmission,
+  createStaffQuestion,
   createSubmission,
+  deleteStaffQuestion,
   downloadAccessory,
+  fetchAdminDevices,
+  fetchAdminSubmissions,
+  fetchLeaderboard,
   fetchQuestions,
+  fetchStaffQuestions,
   fetchSubmission,
+  resendDeviceCommand,
   SUBMISSION_SECRET_HEADER,
+  updateStaffQuestion,
 } from './client';
 export { normalizeApiError, normalizeNetworkError } from './errors';
 export {
@@ -19,9 +27,17 @@ export {
   ACCESSORY_POLL_TIMEOUT_MS,
   questionKeys,
   questionsQueryOptions,
+  resendCommandMutationOptions,
+  staffQuestionsQueryOptions,
   submitAnswersMutationOptions,
   submissionKeys,
   submissionQueryOptions,
+  adminDevicesQueryOptions,
+  adminSubmissionsQueryOptions,
+  createQuestionMutationOptions,
+  deleteQuestionMutationOptions,
+  leaderboardQueryOptions,
+  updateQuestionMutationOptions,
 } from './queries';
 export {
   ApiClientError,
@@ -31,7 +47,14 @@ export {
   type ClaimResponse,
   type CreateSubmissionRequest,
   type CreateSubmissionResponse,
+  type LeaderboardEntry,
+  type PageResponse,
   type Question,
+  type ResendCommandResult,
   type ScoredAnswer,
+  type StaffQuestion,
   type SubmissionDetail,
+  type UpsertQuestion,
+  type AdminDevice,
+  type AdminSubmission,
 } from './types';

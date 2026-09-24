@@ -20,6 +20,9 @@ effect per new `commandId`, persist a 64-entry NVS ring, and ACK on
 | Libraries | ArduinoJson 7.4.3, PubSubClient 2.8 |
 
 ```bash
+cp firmware/esp32/secrets.h.example firmware/esp32/secrets.h
+                        #OR
+cp secrets.h.example secrets.h
 ## XXXX=0001
 pio run -e esp32dev -t upload --upload-port /dev/cu.usbserial-XXXX
 pio run -e esp32dev-lcd1602 -t upload --upload-port /dev/cu.usbserial-0001
@@ -52,6 +55,7 @@ ACK (PubSubClient QoS 0 publish) on `devices/{deviceId}/status`:
 ```
 
 `commandId` is unchanged from the outbox through SNS/SQS/MQTT/DynamoDB/ACK.
+`intensity` must be an integer from 1 to 5. Anything outside that range is ignored: no LED, buzzer, motor, or ACK. 3 is the backend fallback when reward selection is unavailable.
 Duplicates, including after reboot, skip the physical effect and still ACK.
 Do not claim end-to-end exactly-once transport.
 
@@ -80,22 +84,39 @@ Pin order on cheap modules is sometimes VCC-GND-SCL-SDA, sometimes GND-VCC-SCL-S
 
 Idle: eyes look around and blink. `event=correct` (student passed): bounce + happy squint + sparkle. `event=incorrect`: gentle sway + hopeful blink, not an X or a frown.
 
-### 1602 HD44780 + I2C backpack — env `esp32dev-lcd1602`
+### 1602 I2C — env `esp32dev-lcd1602`
 
-4-pin PCF8574/PCF8574A backpack on a 16×2. Same SDA/SCL as the OLED. **VCC is 5 V** on almost every backpack; 3.3 V is a blank/washed-out screen, not a firmware bug. Twist the backpack contrast pot if you have backlight but no glyphs.
+Must flash **`-e esp32dev-lcd1602`**. Bare `pio run` is SSD1306 and this panel stays blank.
+
+| Family | Chip | I2C | VCC |
+|---|---|---|---|
+| **PCF8574A backpack** (this project’s module) | `PCF8574A` / `PCF8574AT` | **`0x38–0x3F`, usually `0x3F`** | **5 V** |
+| PCF8574 backpack | `PCF8574` / `PCF8574T` | `0x20–0x27`, usually `0x27` | **5 V** |
+| Gravity DFR0464 | LCD + RGB, **not** PCF8574A | `0x3E` **and** RGB `0x60`/`0x6B`/`0x2D` | 3.3–5 V |
+
+`0x3E` is a legal **PCF8574A** address. Gravity is only selected if a second RGB chip ACKs. Probe order: Gravity-with-RGB → PCF8574A (`0x3F` first) → PCF8574. Two backpack pinouts: YwRobot then MJKDZ.
 
 | Backpack pin | ESP32 |
 |---|---|
-| VCC | **5 V** |
+| VCC | **5 V** (3.3 V = empty glass even when I2C ACKs) |
 | GND | GND |
 | SCL | GPIO **22** |
 | SDA | GPIO **21** |
 
+Twist the blue contrast pot on the backpack if the backlight is on and there are no glyphs.
+
 `pio run -e esp32dev-lcd1602 -t upload --upload-port /dev/cu.usbserial-0001`
 
-Probes `0x27`, then `0x3F`, then the rest of the PCF8574 range. Serial `[lcd] hd44780 16x2 addr=0x..` on success; an I2C scan if nothing ACKs.
+Want serial `[lcd] pcf8574a addr=0x3F rgb=0x00 sda=21 scl=22` and boot text `pcf8574a ok`. Gravity would log `gravity` + a non-zero `rgb`. Scan dump if nothing ACKs.
 
-Idle: `CyberSixSeven` / `linking...` then `ready`. `event=correct`: `:)  NICE WORK!`. `event=incorrect`: `almost there` / `try once more` (encouraging, not “wrong”). Driver is `src/lcd1602.cpp` over `Wire` — no LiquidCrystal_I2C.
+Boot/idle (16×2 wrap of “Hi, beautiful student. My name is ${PROFILE_NAME}”; default `Bob` in `secrets.h`):
+
+```
+Hi, beautiful
+My name is Bob
+```
+
+`event=correct`: `:)  NICE WORK!`. `event=incorrect`: `almost there` / `try once more`. `src/lcd1602.cpp` over `Wire`.
 
 Incorrect reactions are gentle (soft LED + rising tone + encouraging face/text). Correct
 reactions are upbeat. Intensity is clamped to 1–5.
@@ -107,7 +128,7 @@ Compile-time (`-D C67_LCD_TYPE=<int>`), not `secrets.h`. Bare `pio run` is type 
 | `C67_LCD_TYPE` | PlatformIO env | Panel | VCC | I2C | Driver |
 |---|---|---|---|---|---|
 | `1` | `esp32dev` (default) | 0.96" SSD1306 128×64 | 3.3 V | `0x3C` / `0x3D` | `src/ssd1306.cpp` |
-| `2` | `esp32dev-lcd1602` | HD44780 1602 + PCF8574 backpack | **5 V** | `0x27` / `0x3F` | `src/lcd1602.cpp` |
+| `2` | `esp32dev-lcd1602` | 16×2 PCF8574A (`0x3F`) / PCF8574 (`0x27`); Gravity only if `0x3E`+RGB | **5 V** / 3.3–5 V | see row | `src/lcd1602.cpp` |
 | `3+` | `esp32dev-<name>` | next panel | per module | per module | `src/<chip>.cpp` |
 
 SDA **21** / SCL **22** for every I2C panel. One module on the bus. `face.cpp` `#if`s on `C67_LCD_TYPE`. No extra PlatformIO libraries.

@@ -5,6 +5,7 @@ import com.cybersixseven.devicecommandservice.command.DeviceEventStates;
 import com.cybersixseven.devicecommandservice.dynamodb.DeviceEventItem;
 import com.cybersixseven.devicecommandservice.dynamodb.DeviceEventStore;
 import com.cybersixseven.devicecommandservice.mqtt.MqttCommandPublisher;
+import com.cybersixseven.devicecommandservice.reward.RewardClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -28,6 +29,7 @@ public class DeviceCommandProcessor {
   private final DeviceEventStore deviceEventStore;
   private final ObjectProvider<MqttCommandPublisher> mqttPublisher;
   private final ObjectMapper objectMapper;
+  private final RewardClient rewardClient;
   private final String queueUrl;
 
   public DeviceCommandProcessor(
@@ -35,11 +37,13 @@ public class DeviceCommandProcessor {
       DeviceEventStore deviceEventStore,
       ObjectProvider<MqttCommandPublisher> mqttPublisher,
       ObjectMapper objectMapper,
+      RewardClient rewardClient,
       @Value("${app.aws.device-commands-queue-url}") String queueUrl) {
     this.sqsClient = sqsClient;
     this.deviceEventStore = deviceEventStore;
     this.mqttPublisher = mqttPublisher;
     this.objectMapper = objectMapper;
+    this.rewardClient = rewardClient;
     this.queueUrl = queueUrl;
   }
 
@@ -68,7 +72,7 @@ public class DeviceCommandProcessor {
   }
 
   public void handle(Message message) {
-    DeviceCommandMessage command = objectMapper.readValue(message.body(), DeviceCommandMessage.class);
+    DeviceCommandMessage command = applyReward(objectMapper.readValue(message.body(), DeviceCommandMessage.class));
     DeviceEventItem existing = deviceEventStore.find(command.commandId().toString()).orElse(null);
     if (existing != null && DeviceEventStates.isComplete(existing.getState())) {
       log.info(
@@ -93,6 +97,16 @@ public class DeviceCommandProcessor {
         command.commandId(),
         command.submissionId(),
         command.deviceId());
+  }
+
+  private DeviceCommandMessage applyReward(DeviceCommandMessage command) {
+    if (command.score() == null || command.totalQuestions() == null) {
+      return command.withIntensity(DeviceCommandMessage.clampIntensity(command.intensity()));
+    }
+    int intensity = rewardClient
+        .selectIntensity(command.score(), command.totalQuestions())
+        .orElse(DeviceCommandMessage.DEFAULT_INTENSITY);
+    return command.withIntensity(DeviceCommandMessage.clampIntensity(intensity));
   }
 
   private void extendVisibility(Message message) {

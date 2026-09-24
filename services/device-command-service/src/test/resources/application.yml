@@ -31,3 +31,10 @@ app:
     internal-api-key: test-internal-api-key
     connect-timeout-ms: 200
     read-timeout-ms: 500
+  reward:
+    base-url: http://127.0.0.1:1
+    internal-api-key: test-internal-api-key
+    connect-timeout-ms: 200
+    read-timeout-ms: 200
+  grpc:
+    internal-api-key: test-internal-api-key

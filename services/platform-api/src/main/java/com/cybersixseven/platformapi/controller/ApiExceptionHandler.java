@@ -10,7 +10,14 @@ import com.cybersixseven.platformapi.service.DuplicateEmailException;
 import com.cybersixseven.platformapi.service.InvalidAuthException;
 import com.cybersixseven.platformapi.service.InvalidHeartbeatException;
 import com.cybersixseven.platformapi.service.InvalidSubmissionException;
+import com.cybersixseven.platformapi.service.CommandNotFoundException;
+import com.cybersixseven.platformapi.service.DisplayOrderConflictException;
+import com.cybersixseven.platformapi.service.InvalidQuestionException;
 import com.cybersixseven.platformapi.service.ProductUnavailableException;
+import com.cybersixseven.platformapi.service.QuestionNotFoundException;
+import com.cybersixseven.platformapi.service.ResendRateLimitedException;
+import com.cybersixseven.platformapi.service.ResendTimeoutException;
+import com.cybersixseven.platformapi.service.ResendUnavailableException;
 import com.cybersixseven.platformapi.service.RobotNotFoundException;
 import com.cybersixseven.platformapi.service.SubmissionNotFoundException;
 import org.springframework.http.HttpStatus;
@@ -99,5 +106,47 @@ public class ApiExceptionHandler {
     @ResponseStatus(HttpStatus.CONFLICT)
     public ApiErrorResponse handleAccessoryNotReady() {
         return new ApiErrorResponse("ACCESSORY_NOT_READY", "accessory is not ready");
+    }
+
+    @ExceptionHandler(InvalidQuestionException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ApiErrorResponse handleInvalidQuestion(InvalidQuestionException exception) {
+        return new ApiErrorResponse("INVALID_QUESTION", exception.getMessage());
+    }
+
+    @ExceptionHandler(QuestionNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ApiErrorResponse handleQuestionNotFound() {
+        return new ApiErrorResponse("QUESTION_NOT_FOUND", "question not found");
+    }
+
+    @ExceptionHandler(DisplayOrderConflictException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ApiErrorResponse handleDisplayOrderConflict() {
+        return new ApiErrorResponse("DISPLAY_ORDER_CONFLICT", "displayOrder is already used");
+    }
+
+    @ExceptionHandler(CommandNotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ApiErrorResponse handleCommandNotFound() {
+        return new ApiErrorResponse("COMMAND_NOT_FOUND", "command not found");
+    }
+
+    @ExceptionHandler(ResendRateLimitedException.class)
+    @ResponseStatus(HttpStatus.TOO_MANY_REQUESTS)
+    public ApiErrorResponse handleResendRateLimited() {
+        return new ApiErrorResponse("RESEND_RATE_LIMITED", "resend rate limit exceeded");
+    }
+
+    @ExceptionHandler(ResendTimeoutException.class)
+    @ResponseStatus(HttpStatus.GATEWAY_TIMEOUT)
+    public ApiErrorResponse handleResendTimeout() {
+        return new ApiErrorResponse("RESEND_TIMEOUT", "command resend timed out");
+    }
+
+    @ExceptionHandler(ResendUnavailableException.class)
+    @ResponseStatus(HttpStatus.SERVICE_UNAVAILABLE)
+    public ApiErrorResponse handleResendUnavailable() {
+        return new ApiErrorResponse("RESEND_UNAVAILABLE", "command service unavailable");
     }
 }

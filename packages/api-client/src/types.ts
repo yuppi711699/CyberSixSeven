@@ -54,6 +54,65 @@ export interface ClaimResponse {
   studentId: string;
 }
 
+export interface PageResponse<T> {
+  content: T[];
+  page: {
+    size: number;
+    number: number;
+    totalElements: number;
+    totalPages: number;
+  };
+}
+
+export interface StaffQuestion {
+  id: string;
+  prompt: string;
+  options: number[];
+  correctAnswer: number;
+  maxPoints: number;
+  displayOrder: number;
+}
+
+export interface UpsertQuestion {
+  prompt: string;
+  options: number[];
+  correctAnswer: number;
+  maxPoints: number;
+  displayOrder: number;
+}
+
+export interface AdminSubmission {
+  id: string;
+  studentId: string | null;
+  nickname: string;
+  score: number;
+  maxScore: number;
+  accessoryStatus: string;
+  createdAt: string;
+}
+
+export interface AdminDevice {
+  id: string;
+  hardwareId: string;
+  studentId: string | null;
+  active: boolean;
+  lastSeenAt: string | null;
+  createdAt: string;
+}
+
+export interface LeaderboardEntry {
+  userId: string;
+  nickname: string;
+  score: number;
+  rank: number;
+}
+
+export interface ResendCommandResult {
+  commandId: string;
+  accepted: boolean;
+  message: string;
+}
+
 export class ApiClientError extends Error {
   readonly status: number;
   readonly code: string;

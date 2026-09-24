@@ -5,11 +5,18 @@ import {
 } from './config';
 import { normalizeApiError, normalizeNetworkError } from './errors';
 import type {
+  AdminDevice,
+  AdminSubmission,
   ClaimResponse,
   CreateSubmissionRequest,
   CreateSubmissionResponse,
+  LeaderboardEntry,
+  PageResponse,
   Question,
+  ResendCommandResult,
+  StaffQuestion,
   SubmissionDetail,
+  UpsertQuestion,
 } from './types';
 
 async function request<T>(
@@ -126,4 +133,72 @@ export async function downloadAccessory(id: string): Promise<void> {
   } finally {
     URL.revokeObjectURL(objectUrl);
   }
+}
+
+function pageQuery(params: Record<string, string | number | undefined>): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== '') {
+      search.set(key, String(value));
+    }
+  }
+  const query = search.toString();
+  return query ? `?${query}` : '';
+}
+
+export function fetchStaffQuestions(): Promise<StaffQuestion[]> {
+  return request<StaffQuestion[]>('/api/admin/questions');
+}
+
+export function createStaffQuestion(body: UpsertQuestion): Promise<StaffQuestion> {
+  return request<StaffQuestion>('/api/admin/questions', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateStaffQuestion(id: string, body: UpsertQuestion): Promise<StaffQuestion> {
+  return request<StaffQuestion>(`/api/admin/questions/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteStaffQuestion(id: string): Promise<void> {
+  return request<void>(`/api/admin/questions/${id}`, { method: 'DELETE' });
+}
+
+export function fetchAdminSubmissions(params: {
+  page?: number;
+  size?: number;
+  sort?: string;
+  studentId?: string;
+}): Promise<PageResponse<AdminSubmission>> {
+  return request<PageResponse<AdminSubmission>>(
+    `/api/admin/submissions${pageQuery(params)}`,
+  );
+}
+
+export function fetchAdminDevices(params: {
+  page?: number;
+  size?: number;
+  sort?: string;
+}): Promise<PageResponse<AdminDevice>> {
+  return request<PageResponse<AdminDevice>>(`/api/admin/devices${pageQuery(params)}`);
+}
+
+export function fetchLeaderboard(params: {
+  page?: number;
+  size?: number;
+}): Promise<PageResponse<LeaderboardEntry>> {
+  return request<PageResponse<LeaderboardEntry>>(
+    `/api/admin/leaderboard${pageQuery(params)}`,
+  );
+}
+
+export function resendDeviceCommand(deviceId: string): Promise<ResendCommandResult> {
+  return request<ResendCommandResult>(`/api/admin/devices/${deviceId}/resend-command`, {
+    method: 'POST',
+    body: '{}',
+  });
 }

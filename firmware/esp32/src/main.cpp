@@ -25,6 +25,10 @@ constexpr char CLIENT_CERT[] = "";
 constexpr char CLIENT_KEY[] = "";
 #endif
 
+#ifndef PROFILE_NAME
+constexpr char PROFILE_NAME[] = "Bob";
+#endif
+
 namespace {
 
 constexpr uint8_t kLedPin = 2;
@@ -280,7 +284,12 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
   copyField(pending.commandId, sizeof(pending.commandId), doc["commandId"].as<const char*>());
   copyField(pending.submissionId, sizeof(pending.submissionId), doc["submissionId"].as<const char*>());
   copyField(pending.event, sizeof(pending.event), event);
-  pending.intensity = clampIntensity(doc["intensity"].as<int>());
+  const int rawIntensity = doc["intensity"].as<int>();
+  if (rawIntensity < 1 || rawIntensity > 5) {
+    Serial.printf("[mqtt] intensity out of range=%d\n", rawIntensity);
+    return;
+  }
+  pending.intensity = static_cast<uint8_t>(rawIntensity);
   if (pending.commandId[0] == '\0' || pending.submissionId[0] == '\0') {
     pending.ready = false;
     return;
@@ -420,15 +429,17 @@ void setup() {
 
   Serial.println();
   Serial.println("[boot] CyberSixSeven ESP32 firmware v0.3");
-  Serial.printf("[boot] device=%s lcd=%s led=%u buzzer=%u motor=%u sda=%u scl=%u\n",
+  Serial.printf("[boot] device=%s lcd=%s profile=%s led=%u buzzer=%u motor=%u sda=%u scl=%u\n",
                 DEVICE_ID,
                 faceLcdName(),
+                PROFILE_NAME,
                 static_cast<unsigned>(kLedPin),
                 static_cast<unsigned>(kBuzzerPin),
                 static_cast<unsigned>(kMotorPin),
                 static_cast<unsigned>(kLcdSdaPin),
                 static_cast<unsigned>(kLcdSclPin));
 
+  faceSetProfileName(PROFILE_NAME);
   faceBegin();
   loadRing();
   configureTls();

@@ -15,6 +15,13 @@ set -a && source .env && set +a
 ```
 
 ```bash
+# reward-service — :8082
+# Start before device-command-service. Internal only: POST /reward/select.
+set -a && source .env && set +a
+./services/mvnw -f services/reward-service/pom.xml spring-boot:run
+```
+
+```bash
 # device-command-service — :8081 HTTP, :9090 gRPC
 # spring-boot:run sets cwd to the module, so cert paths must be absolute
 set -a && source .env && set +a
@@ -141,7 +148,7 @@ Set real values before starting anything:
 
 - `POSTGRES_PASSWORD` and `DB_PASSWORD` — same password. Compose refuses to start Postgres until `POSTGRES_PASSWORD` is set. `platform-api` reads `DB_PASSWORD`.
 - `JWT_SECRET` — at least 32 bytes. Shorter and the API fails at startup.
-- `INTERNAL_API_KEY` — shared by `platform-api`, `device-command-service`, and `model-gen-service`.
+- `INTERNAL_API_KEY` — shared by `platform-api`, `device-command-service`, `reward-service`, and `model-gen-service`.
 - `FIXTURE_TEACHER_PASSWORD` and `FIXTURE_ADMIN_PASSWORD` — used when `APP_FIXTURES_ENABLED=true` to seed a teacher and an admin. Students register themselves in the student app.
 - `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` — only required for “Continue with Google”. Password login works without a real Google client. Authorized redirect URI for local Google login: `http://localhost:8080/login/oauth2/code/google`.
 
@@ -249,6 +256,17 @@ HTTP health: [http://localhost:8081/actuator/health](http://localhost:8081/actua
 
 Without a board, this process still consumes the queue and publishes to Mosquitto. Nothing physical happens until firmware is connected. Flash and serial monitor steps are in [`firmware/esp32/README.md`](firmware/esp32/README.md).
 
+### 6b. Reward selection
+
+Start this before `device-command-service`. It has no database. Every call needs `X-Internal-Api-Key` (the same `INTERNAL_API_KEY`).
+
+```bash
+set -a && source .env && set +a
+./services/mvnw -f services/reward-service/pom.xml spring-boot:run
+```
+
+`POST http://localhost:8082/reward/select` with `{"score":2,"totalQuestions":2}` returns intensity `5` and voice line `nailed-it`. A score of `0` returns intensity `1`. If this process is down, `device-command-service` publishes intensity `3` and keeps consuming the queue.
+
 ### 7. Calling the API by hand
 
 Import `postman/CyberSixSeven.postman_collection.json`. Fixed bases:
@@ -257,6 +275,7 @@ Import `postman/CyberSixSeven.postman_collection.json`. Fixed bases:
 |---|---|
 | platform-api | `http://localhost:8080` |
 | device-command-service | `http://localhost:8081` |
+| reward-service | `http://localhost:8082` |
 | model-gen-service | `http://localhost:8000` |
 
 Main platform routes: `/api/auth/*`, `/api/questions`, `/api/submissions`, `/api/robots`, `/api/csrf`. Internal routes (`/internal/**`) require `X-Internal-Api-Key`.
@@ -298,6 +317,7 @@ terraform validate
 |---|---|
 | platform-api | 8080 |
 | device-command-service | 8081 HTTP, 9090 gRPC |
+| reward-service | 8082 |
 | model-gen-service | 8000 |
 | student-web | 3000 |
 | admin-web | 3001 |

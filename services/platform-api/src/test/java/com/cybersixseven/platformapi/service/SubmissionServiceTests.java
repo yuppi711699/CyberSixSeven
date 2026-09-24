@@ -18,6 +18,7 @@ import com.cybersixseven.platformapi.entity.OutboxEvent;
 import com.cybersixseven.platformapi.entity.Question;
 import com.cybersixseven.platformapi.entity.Submission;
 import com.cybersixseven.platformapi.event.OutboxCommittedEvent;
+import com.cybersixseven.platformapi.event.SubmissionScoredEvent;
 import com.cybersixseven.platformapi.repository.OutboxEventRepository;
 import com.cybersixseven.platformapi.repository.QuestionRepository;
 import com.cybersixseven.platformapi.repository.SubmissionRepository;
@@ -122,7 +123,10 @@ class SubmissionServiceTests {
         assertEquals("esp32-dev-001", outbox.getPayload().deviceId());
         assertEquals("incorrect", outbox.getPayload().event());
         assertEquals(3, outbox.getPayload().intensity());
+        assertEquals(2, outbox.getPayload().score());
+        assertEquals(3, outbox.getPayload().totalQuestions());
         verify(eventPublisher).publishEvent(any(OutboxCommittedEvent.class));
+        verify(eventPublisher).publishEvent(any(SubmissionScoredEvent.class));
     }
 
     @Test

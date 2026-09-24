@@ -13,7 +13,9 @@ import com.cybersixseven.devicecommandservice.command.DeviceEventStates;
 import com.cybersixseven.devicecommandservice.dynamodb.DeviceEventItem;
 import com.cybersixseven.devicecommandservice.dynamodb.DeviceEventStore;
 import com.cybersixseven.devicecommandservice.mqtt.MqttCommandPublisher;
+import com.cybersixseven.devicecommandservice.reward.RewardClient;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,6 +46,9 @@ class DeviceCommandProcessorTests {
   @Mock
   private ObjectProvider<MqttCommandPublisher> mqttPublisher;
 
+  @Mock
+  private RewardClient rewardClient;
+
   private DeviceCommandProcessor processor;
   private UUID commandId;
   private UUID submissionId;
@@ -52,8 +57,10 @@ class DeviceCommandProcessorTests {
   @BeforeEach
   void setUp() {
     lenient().when(mqttPublisher.getObject()).thenReturn(mqttCommandPublisher);
+    lenient().when(rewardClient.selectIntensity(org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt()))
+        .thenReturn(OptionalInt.empty());
     processor = new DeviceCommandProcessor(
-        sqsClient, deviceEventStore, mqttPublisher, new JsonMapper(), "http://queue");
+        sqsClient, deviceEventStore, mqttPublisher, new JsonMapper(), rewardClient, "http://queue");
     commandId = UUID.fromString("11111111-1111-1111-1111-111111111111");
     submissionId = UUID.fromString("22222222-2222-2222-2222-222222222222");
     body =
@@ -180,10 +187,48 @@ class DeviceCommandProcessorTests {
   @Test
   void pollReturnsImmediatelyWhenQueueUrlIsBlank() {
     DeviceCommandProcessor idle = new DeviceCommandProcessor(
-        sqsClient, deviceEventStore, mqttPublisher, new JsonMapper(), "");
+        sqsClient, deviceEventStore, mqttPublisher, new JsonMapper(), rewardClient, "");
     idle.poll();
     verify(sqsClient, never())
         .receiveMessage(any(ReceiveMessageRequest.class));
+  }
+
+  @Test
+  void rewardSelectionReplacesIntensity() {
+    when(deviceEventStore.find(commandId.toString())).thenReturn(Optional.empty());
+    when(deviceEventStore.markSent(commandId.toString())).thenReturn(true);
+    when(rewardClient.selectIntensity(2, 3)).thenReturn(OptionalInt.of(5));
+    body =
+        """
+        {"commandId":"%s","submissionId":"%s","deviceId":"esp32-dev-001","event":"incorrect","intensity":3,"score":2,"totalQuestions":3}
+        """
+            .formatted(commandId, submissionId);
+
+    processor.handle(message());
+
+    ArgumentCaptor<DeviceCommandMessage> captor = ArgumentCaptor.forClass(DeviceCommandMessage.class);
+    verify(mqttCommandPublisher).publishCommand(captor.capture());
+    assertEquals(5, captor.getValue().intensity());
+    assertEquals(commandId, captor.getValue().commandId());
+  }
+
+  @Test
+  void rewardOutageFallsBackToIntensityThree() {
+    when(deviceEventStore.find(commandId.toString())).thenReturn(Optional.empty());
+    when(deviceEventStore.markSent(commandId.toString())).thenReturn(true);
+    when(rewardClient.selectIntensity(1, 3)).thenReturn(OptionalInt.empty());
+    body =
+        """
+        {"commandId":"%s","submissionId":"%s","deviceId":"esp32-dev-001","event":"incorrect","intensity":1,"score":1,"totalQuestions":3}
+        """
+            .formatted(commandId, submissionId);
+
+    processor.handle(message());
+
+    ArgumentCaptor<DeviceCommandMessage> captor = ArgumentCaptor.forClass(DeviceCommandMessage.class);
+    verify(mqttCommandPublisher).publishCommand(captor.capture());
+    assertEquals(DeviceCommandMessage.DEFAULT_INTENSITY, captor.getValue().intensity());
+    verify(sqsClient).deleteMessage(any(DeleteMessageRequest.class));
   }
 
   private Message message() {

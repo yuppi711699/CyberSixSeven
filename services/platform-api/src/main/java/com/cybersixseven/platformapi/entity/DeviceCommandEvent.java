@@ -7,4 +7,12 @@ public record DeviceCommandEvent(
         UUID submissionId,
         String deviceId,
         String event,
-        int intensity) {}
+        int intensity,
+        Integer score,
+        Integer totalQuestions) {
+
+    public DeviceCommandEvent(
+            UUID commandId, UUID submissionId, String deviceId, String event, int intensity) {
+        this(commandId, submissionId, deviceId, event, intensity, null, null);
+    }
+}

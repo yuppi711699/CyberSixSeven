@@ -16,6 +16,7 @@ FaceMode mode = FaceMode::Idle;
 uint32_t modeStartedAtMs = 0;
 uint32_t modeDurationMs = 0;
 uint32_t lastFrameAtMs = 0;
+char profileName[17] = "Bob";
 
 #if C67_LCD_TYPE == C67_LCD_LCD1602
 
@@ -25,22 +26,30 @@ bool displayReady() {
   return lcd1602Ready();
 }
 
+void showGreeting() {
+  char line0[17];
+  char line1[17];
+  // 16x2 cannot fit the full sentence. Wrap so glyphs are actually visible.
+  snprintf(line0, sizeof(line0), "Hi, beautiful");
+  snprintf(line1, sizeof(line1), "My name is %.5s", profileName);
+  lcd1602SetRgb(255, 255, 255);
+  lcd1602SetLines(line0, line1);
+}
+
 void showIdle(uint32_t now, bool mqttReady) {
-  if (mqttReady) {
-    lcd1602SetLines("CyberSixSeven", "ready");
-    return;
-  }
-  const uint8_t step = static_cast<uint8_t>((now / 400) % 4);
-  const char* dots =
-      step == 0 ? "linking" : step == 1 ? "linking." : step == 2 ? "linking.." : "linking...";
-  lcd1602SetLines("CyberSixSeven", dots);
+  (void)now;
+  (void)mqttReady;
+  showGreeting();
 }
 
 void showHappy() {
+  lcd1602SetRgb(0, 180, 40);
   lcd1602SetLines(":)  NICE WORK!", "you got it");
 }
 
 void showEncourage() {
+  // Soft blue, never red — product rule.
+  lcd1602SetRgb(40, 120, 255);
   lcd1602SetLines("almost there", "try once more");
 }
 
@@ -229,15 +238,28 @@ const char* faceLcdName() {
 #endif
 }
 
+void faceSetProfileName(const char* name) {
+  if (name == nullptr || name[0] == '\0') {
+    snprintf(profileName, sizeof(profileName), "Bob");
+    return;
+  }
+  snprintf(profileName, sizeof(profileName), "%s", name);
+}
+
 void faceBegin() {
 #if C67_LCD_TYPE == C67_LCD_LCD1602
   if (!lcd1602Begin()) {
     return;
   }
-  Serial.printf("[lcd] hd44780 16x2 addr=0x%02X sda=%u scl=%u\n",
+  Serial.printf("[lcd] %s addr=0x%02X rgb=0x%02X sda=%u scl=%u\n",
+                lcd1602Kind(),
                 static_cast<unsigned>(lcd1602Address()),
+                static_cast<unsigned>(lcd1602RgbAddress()),
                 static_cast<unsigned>(kLcdSdaPin),
                 static_cast<unsigned>(kLcdSclPin));
+  Serial.printf("[lcd] Hi, beautiful student. My name is %s\n", profileName);
+  lastFrameAtMs = 0;
+  showGreeting();
 #else
   if (!ssd1306Begin()) {
     Serial.println("[oled] not found on 0x3C/0x3D — check VCC/GND/SDA=21/SCL=22");
@@ -250,9 +272,9 @@ void faceBegin() {
   const uint32_t now = millis();
   nextBlinkAtMs = now + 600;
   nextLookAtMs = now + 200;
-#endif
   lastFrameAtMs = 0;
   facePlayHappy(2);
+#endif
 }
 
 void facePlayHappy(uint8_t intensity) {

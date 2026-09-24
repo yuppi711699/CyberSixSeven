@@ -13,6 +13,7 @@ import com.cybersixseven.platformapi.entity.Question;
 import com.cybersixseven.platformapi.entity.ScoredAnswerSnapshot;
 import com.cybersixseven.platformapi.entity.Submission;
 import com.cybersixseven.platformapi.event.OutboxCommittedEvent;
+import com.cybersixseven.platformapi.event.SubmissionScoredEvent;
 import com.cybersixseven.platformapi.repository.OutboxEventRepository;
 import com.cybersixseven.platformapi.repository.QuestionRepository;
 import com.cybersixseven.platformapi.repository.SubmissionRepository;
@@ -89,10 +90,18 @@ public class SubmissionService {
         Device device = deviceAssignmentService.requireAssignedDevice(studentId);
         UUID commandId = UUID.randomUUID();
         String event = score == maxScore ? EVENT_CORRECT : EVENT_INCORRECT;
+        int correctCount = (int) snapshots.stream().filter(ScoredAnswerSnapshot::correct).count();
         DeviceCommandEvent payload = new DeviceCommandEvent(
-                commandId, submission.getId(), device.getHardwareId(), event, defaultIntensity);
+                commandId,
+                submission.getId(),
+                device.getHardwareId(),
+                event,
+                defaultIntensity,
+                correctCount,
+                snapshots.size());
         outboxEventRepository.save(new OutboxEvent(commandId, payload, now));
         eventPublisher.publishEvent(new OutboxCommittedEvent(commandId));
+        eventPublisher.publishEvent(new SubmissionScoredEvent(submission.getId(), studentId, score));
 
         return new CreateSubmissionResponse(
                 submission.getId(),
@@ -149,6 +158,8 @@ public class SubmissionService {
         }
         submission.assignOwner(studentId);
         submission.revokeCapability(capabilityGenerator.generate().hash());
+        eventPublisher.publishEvent(
+                new SubmissionScoredEvent(submission.getId(), studentId, submission.getScore()));
         return new ClaimResponse(submission.getId(), studentId);
     }
 

@@ -1,0 +1,9 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: reward-service
+
+app:
+  internal-api-key: ${INTERNAL_API_KEY:}
