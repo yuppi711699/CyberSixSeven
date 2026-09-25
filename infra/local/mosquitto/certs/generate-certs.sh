@@ -10,6 +10,9 @@
 #
 #     ISSUE_BROKER_ONLY=1 ./generate-certs.sh
 #     docker compose restart mosquitto
+#
+# Full CA rotation (re-paste device PEMs / reflash): ./setup/firstSetup.sh --force-certs
+# from the repo root. Do not run this script from firmware/esp32.
 set -euo pipefail
 
 OUT="${1:-$(cd "$(dirname "$0")" && pwd)}"
@@ -64,9 +67,23 @@ if [[ "${ISSUE_BROKER_ONLY:-}" == 1 ]]; then
   exit 0
 fi
 
-openssl req -x509 -newkey rsa:4096 -sha256 -days "$DAYS" -nodes \
-  -keyout ca.key -out ca.crt \
+# ESP32 mbedTLS 2.28 rejects a v1 self-signed CA (no CA:TRUE). Desktop
+# OpenSSL still verifies those, which is how you get -9984 on the board
+# and Verify return code: 0 on the Mac. LibreSSL on macOS has no -addext
+# on `req -x509`, so CSR + extfile.
+openssl req -new -newkey rsa:4096 -sha256 -nodes \
+  -keyout ca.key -out ca.csr \
   -subj "/CN=CyberSixSeven Local CA"
+cat > ca.ext <<EOF
+basicConstraints=critical,CA:TRUE
+keyUsage=critical,keyCertSign,cRLSign
+subjectKeyIdentifier=hash
+EOF
+openssl x509 -req -in ca.csr -signkey ca.key -days "$DAYS" -sha256 \
+  -extfile ca.ext -out ca.crt
+rm -f ca.csr ca.ext
+chmod 644 ca.crt
+chmod 600 ca.key
 
 rm -f broker.key
 issue_broker

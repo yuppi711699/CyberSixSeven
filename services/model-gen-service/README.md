@@ -18,6 +18,8 @@ publishes **no `cp310` wheel**.
 
 ## Setup
 
+`./setup/firstSetup.sh` at the repo root creates this venv. Manual:
+
 ```bash
 cd services/model-gen-service
 python3.13 -m venv .venv && source .venv/bin/activate

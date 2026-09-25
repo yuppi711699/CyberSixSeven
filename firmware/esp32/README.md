@@ -19,23 +19,30 @@ effect per new `commandId`, persist a 64-entry NVS ring, and ACK on
 | MQTT | TLS 8883, client certificates required |
 | Libraries | ArduinoJson 7.4.3, PubSubClient 2.8 |
 
+From **repo root** (not this directory):
+
 ```bash
-cp firmware/esp32/secrets.h.example firmware/esp32/secrets.h
-                        #OR
-cp secrets.h.example secrets.h
+./setup/firstSetup.sh
+# then only WIFI_SSID / WIFI_PASSWORD in firmware/esp32/secrets.h
 ## XXXX=0001
 pio run -e esp32dev -t upload --upload-port /dev/cu.usbserial-XXXX
-pio run -e esp32dev-lcd1602 -t upload --upload-port /dev/cu.usbserial-0001
+pio run -d firmware/esp32 -e esp32dev-lcd1602 -t upload --upload-port /dev/cu.usbserial-0001
+# SSD1306: -e esp32dev    port: your /dev/cu.usbserial-*
 pio device monitor --port /dev/cu.usbserial-0001 -b 115200 --dtr 0 --rts 0
 ```
 
-## Setup
+Do not `cp secrets.h.example` over an existing `secrets.h` after firstSetup — that wipes the PEMs and MQTT fails with `-9984`.
+
+## Setup (manual, if you skip firstSetup)
+
+All of this is from the **repo root**:
 
 ```bash
 cp firmware/esp32/secrets.h.example firmware/esp32/secrets.h
-# edit Wi-Fi, DEVICE_ID, MQTT_BROKER_HOST
+# edit WIFI_SSID, WIFI_PASSWORD (MQTT_BROKER_HOST = your Mac en0 IPv4)
 infra/local/mosquitto/certs/generate-certs.sh
 # paste ca.crt, esp32-dev-001.crt, and esp32-dev-001.key into secrets.h
+# not paho.crt — that cert is for device-command-service
 ```
 
 `firmware/esp32/secrets.h` is gitignored. Generated broker/device keys are gitignored.
@@ -158,9 +165,12 @@ broker cert SAN lacks `DNS:<MQTT_BROKER_HOST>`. ESP32 mbedTLS 2.28 ignores IP
 SANs and only matches dNSName. Do not call `setInsecure()`. Reissue (same CA):
 
 ```bash
+# repo root — do not run from firmware/esp32
 ISSUE_BROKER_ONLY=1 infra/local/mosquitto/certs/generate-certs.sh
 docker compose restart mosquitto
 ```
+
+`--force-certs` on `./setup/firstSetup.sh` rotates the CA (then reflash). `ISSUE_BROKER_ONLY=1` only reissues the broker SAN.
 
 Then tap EN. No firmware reflash if `secrets.h` already has this CA.
 

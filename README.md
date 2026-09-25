@@ -1,9 +1,19 @@
 # CyberSixSeven
 
-Run one block per terminal, from the repo root. First-time setup (`.env`, certs, `pnpm install`, Python venv) is under [Run locally](#run-locally).
+After a git clone (macOS / Linux):
 
 ```bash
-# infrastructure — Postgres, Redis, LocalStack, Mosquitto
+./setup/firstSetup.sh
+```
+
+That installs packages, generates mTLS certs, writes cert **paths** into `.env`, injects PEMs + broker IP into `firmware/esp32/secrets.h`, and starts Docker infra. It does **not** start Spring or Next. Windows is not supported.
+
+Then fill `WIFI_SSID` / `WIFI_PASSWORD` in `firmware/esp32/secrets.h` if you have a board. `.env.example` placeholders are enough to boot locally; replace them if you share the machine.
+
+Start one block per terminal, from the repo root:
+
+```bash
+# infrastructure — already up after firstSetup; use this only if you stopped it
 docker compose up -d
 ```
 
@@ -23,19 +33,9 @@ set -a && source .env && set +a
 
 ```bash
 # device-command-service — :8081 HTTP, :9090 gRPC
-# spring-boot:run sets cwd to the module, so cert paths must be absolute
+# firstSetup writes absolute MQTT_*_PATH into .env; source it
 set -a && source .env && set +a
-ROOT="$(pwd)"
 export AWS_ENDPOINT="${AWS_ENDPOINT:-${AWS_ENDPOINT_URL:-http://localhost:4566}}"
-export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-test}"
-export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-test}"
-export AWS_REGION="${AWS_REGION:-us-west-2}"
-export DEVICE_COMMANDS_QUEUE_URL="${DEVICE_COMMANDS_QUEUE_URL:-http://localhost:4566/000000000000/device-commands}"
-export MQTT_BROKER_URL="${MQTT_BROKER_URL:-ssl://localhost:8883}"
-export MQTT_CA_CERT_PATH="$ROOT/infra/local/mosquitto/certs/ca.crt"
-export MQTT_CLIENT_CERT_PATH="$ROOT/infra/local/mosquitto/certs/paho.crt"
-export MQTT_CLIENT_KEY_PATH="$ROOT/infra/local/mosquitto/certs/paho.key"
-./services/mvnw -f services/pom.xml -pl contracts -DskipTests -q install
 ./services/mvnw -f services/device-command-service/pom.xml spring-boot:run
 ```
 
@@ -121,6 +121,7 @@ Scoring happens on the server against the stored correct answer. The browser nev
 | `services/contracts` | Shared protobuf (`device_command.proto`) |
 | `services/model-gen-service` | Python FastAPI + SQS consumer, port 8000. Writes an STL |
 | `firmware/esp32` | PlatformIO firmware. LCD types in `firmware/esp32/README.md` |
+| `setup/firstSetup.sh` | Clone-time install: certs, `.env` paths, packages, Compose |
 | `infra/local` | LocalStack init script and Mosquitto config |
 | `infra/terraform` | AWS stack (VPC, RDS, Redis, ECS, SNS/SQS, S3, IoT) |
 | `postman/` | HTTP collection for the services |
@@ -130,13 +131,38 @@ Scoring happens on the server against the stored correct answer. The browser nev
 
 ## Prerequisites
 
-- Java 21
+- Java 21+ (`java -version`)
 - Node.js 22.12 or newer (24 is what this repo targets) and [pnpm](https://pnpm.io) 11.26.0. `corepack enable` is enough; `.npmrc` switches pnpm to the pinned version.
-- Docker with Compose v2
+- Docker with Compose v2, daemon running
+- OpenSSL (macOS ships it)
 - Python 3.13 if you run accessory generation (3.12 also works; 3.10 does not — the CAD wheel has no `cp310` build)
 - PlatformIO only if you flash a board
 
 ## Run locally
+
+### 0. First clone — `./setup/firstSetup.sh`
+
+```bash
+./setup/firstSetup.sh
+```
+
+What it writes vs what you type:
+
+| Automatic | You |
+|---|---|
+| `.env` from `.env.example` if missing | Optional: replace `change-me` / `replace-me` |
+| LocalStack ARNs/URLs, `AWS_ENDPOINT` **and** `AWS_ENDPOINT_URL` | — |
+| Absolute `MQTT_*_PATH` to `ca.crt` / `paho.crt` / `paho.key` (file paths, not PEM text) | — |
+| Mosquitto CA + broker + `paho` + `esp32-dev-001` certs | — |
+| Those PEMs + `MQTT_BROKER_HOST` (en0 IPv4) into `secrets.h` | `WIFI_SSID` / `WIFI_PASSWORD` in `secrets.h` |
+| `apps/*/.env.local` | — |
+| `docker compose up -d` and wait until LocalStack init finishes | — |
+| `pnpm install`, Playwright Chromium, Maven **all** JVM modules, model-gen venv | — |
+| `pio run` both LCD envs if `pio` is on PATH (no upload) | Flash with `--upload-port` when you have a board |
+
+Does **not** start Spring or Next. `--force-certs` rotates the CA: reflash the ESP32 and restart `device-command-service`.
+
+Steps 1–6 below are the manual equivalent, plus starting each process.
 
 ### 1. Environment
 
@@ -152,20 +178,21 @@ Set real values before starting anything:
 - `FIXTURE_TEACHER_PASSWORD` and `FIXTURE_ADMIN_PASSWORD` — used when `APP_FIXTURES_ENABLED=true` to seed a teacher and an admin. Students register themselves in the student app.
 - `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` — only required for “Continue with Google”. Password login works without a real Google client. Authorized redirect URI for local Google login: `http://localhost:8080/login/oauth2/code/google`.
 
-`platform-api` loads the repo-root `.env` on its own. Compose does too. The Next apps and the other processes do not — those steps below export what they need.
+`platform-api` loads the repo-root `.env` on its own. Compose does too. The Next apps and the other JVM/Python processes do not — `set -a && source .env` in those terminals.
 
-Append the local AWS endpoints (LocalStack account `000000000000`; the init script prints the same values as `topic=` and `device-queue=`):
+`./setup/firstSetup.sh` already writes LocalStack ARNs, `AWS_ENDPOINT` / `AWS_ENDPOINT_URL`, and **absolute** MQTT cert paths. If you skip the script, append:
 
 ```bash
+AWS_ENDPOINT=http://localhost:4566
 SNS_SUBMISSION_EVENTS_TOPIC_ARN=arn:aws:sns:us-west-2:000000000000:submission-events
 DEVICE_COMMANDS_QUEUE_URL=http://localhost:4566/000000000000/device-commands
 MQTT_BROKER_URL=ssl://localhost:8883
-MQTT_CA_CERT_PATH=infra/local/mosquitto/certs/ca.crt
-MQTT_CLIENT_CERT_PATH=infra/local/mosquitto/certs/paho.crt
-MQTT_CLIENT_KEY_PATH=infra/local/mosquitto/certs/paho.key
+MQTT_CA_CERT_PATH=/ABS/PATH/TO/repo/infra/local/mosquitto/certs/ca.crt
+MQTT_CLIENT_CERT_PATH=/ABS/PATH/TO/repo/infra/local/mosquitto/certs/paho.crt
+MQTT_CLIENT_KEY_PATH=/ABS/PATH/TO/repo/infra/local/mosquitto/certs/paho.key
 ```
 
-Paths are relative to the repo root. Start `device-command-service` from the repo root, or use absolute paths.
+Relative MQTT paths break `device-command-service` because `spring-boot:run` sets cwd to the module.
 
 ### 2. Certificates and infrastructure
 
