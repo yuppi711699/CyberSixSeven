@@ -421,6 +421,21 @@ void setup() {
 
   Serial.println();
   Serial.println("[boot] CyberSixSeven ESP32 firmware v0.3");
+#if C67_LCD_TYPE == C67_LCD_ST7789
+  Serial.printf("[boot] device=%s lcd=%s profile=%s led=%u buzzer=%u motor=%u sck=%u mosi=%u dc=%u cs=%u rst=%u blk=%u\n",
+                DEVICE_ID,
+                faceLcdName(),
+                PROFILE_NAME,
+                static_cast<unsigned>(kLedPin),
+                static_cast<unsigned>(kBuzzerPin),
+                static_cast<unsigned>(kMotorPin),
+                static_cast<unsigned>(kTftSckPin),
+                static_cast<unsigned>(kTftMosiPin),
+                static_cast<unsigned>(kTftDcPin),
+                static_cast<unsigned>(kTftCsPin),
+                static_cast<unsigned>(kTftRstPin),
+                static_cast<unsigned>(kTftBlPin));
+#else
   Serial.printf("[boot] device=%s lcd=%s profile=%s led=%u buzzer=%u motor=%u sda=%u scl=%u\n",
                 DEVICE_ID,
                 faceLcdName(),
@@ -430,6 +445,7 @@ void setup() {
                 static_cast<unsigned>(kMotorPin),
                 static_cast<unsigned>(kLcdSdaPin),
                 static_cast<unsigned>(kLcdSclPin));
+#endif
 
   faceSetProfileName(PROFILE_NAME);
   faceBegin();

@@ -12,8 +12,8 @@ effect per new `commandId`, persist a 64-entry NVS ring, and ACK on
 | Field | Value |
 |---|---|
 | Board | ESP32 DevKit V1 (30-pin), ESP-WROOM-32 |
-| PlatformIO env | `esp32dev` (SSD1306) or `esp32dev-lcd1602` (1602) in `platformio.ini` |
-| LCD type | `-D C67_LCD_TYPE=1` SSD1306 · `-D C67_LCD_TYPE=2` HD44780 1602 |
+| PlatformIO env | `esp32dev` (SSD1306), `esp32dev-lcd1602` (1602), or `esp32dev-st7789` (1.54" SPI) |
+| LCD type | `-D C67_LCD_TYPE=1` SSD1306 · `2` HD44780 1602 · `3` ST7789 240×240 |
 | Platform pin | `espressif32@7.1.3` |
 | Serial | 115200 8N1 |
 | MQTT | TLS 8883, client certificates required |
@@ -27,6 +27,7 @@ From **repo root** (not this directory):
 ## XXXX=0001
 pio run -e esp32dev -t upload --upload-port /dev/cu.usbserial-XXXX
 pio run -d firmware/esp32 -e esp32dev-lcd1602 -t upload --upload-port /dev/cu.usbserial-0001
+pio run -d firmware/esp32 -e esp32dev-st7789 -t upload --upload-port /dev/cu.usbserial-0001
 # SSD1306: -e esp32dev    port: your /dev/cu.usbserial-*
 pio device monitor --port /dev/cu.usbserial-0001 -b 115200 --dtr 0 --rts 0
 ```
@@ -73,8 +74,14 @@ Do not claim end-to-end exactly-once transport.
 | External LED | **2** | digital out | series resistor |
 | Passive buzzer | **4** | PWM out | NPN/MOSFET low-side |
 | Vibration / DC motor | **5** | digital out | MOSFET + flyback diode |
-| SSD1306 OLED / 1602 backpack SDA | **21** | I2C | same bus; only one panel wired |
+| SSD1306 OLED / 1602 backpack SDA | **21** | I2C | types 1 and 2 only; one panel on the bus |
 | SSD1306 OLED / 1602 backpack SCL | **22** | I2C | SSD1306 `0x3C`/`0x3D` · 1602 backpack `0x27`/`0x3F` |
+| ST7789 SCK (SCL) | **18** | SPI | type 3 only |
+| ST7789 MOSI (SDA) | **23** | SPI | no MISO on this module |
+| ST7789 RES | **25** | out | active low |
+| ST7789 DC | **26** | out | |
+| ST7789 CS | **27** | out | active low |
+| ST7789 BLK | **32** | out, HIGH | low or floating turns the backlight off |
 
 Pick the PlatformIO env that matches the glass. `pio run` with no `-e` is SSD1306.
 
@@ -125,6 +132,45 @@ My name is Bob
 
 `event=correct`: `:)  NICE WORK!`. `event=incorrect`: `almost there` / `try once more`. `src/lcd1602.cpp` over `Wire`.
 
+### 1.54" ST7789 240×240 SPI — env `esp32dev-st7789`
+
+Must flash **`-e esp32dev-st7789`**. Bare `pio run` is SSD1306 and this panel stays blank.
+
+Module: 1.54" IPS, ST7789, 4-wire SPI, 240×240, 3.3 V (DORHEA-style 8-pin, PCB “V1.1”). Amazon pin names A5/A7/C4 are not this DevKit — use the GPIO column.
+
+| Module | ESP32 | Notes |
+|---|---|---|
+| GND | GND | |
+| VCC | **3.3 V** | 5 V kills the panel. Not the DevKit `VIN` pin |
+| SCL | GPIO **18** | SCK |
+| SDA | GPIO **23** | MOSI. The module has no MISO |
+| RES | GPIO **25** | active low |
+| DC | GPIO **26** | data / command |
+| CS | GPIO **27** | active low |
+| BLK | GPIO **32** | firmware drives this HIGH. Open or GND = dark glass |
+
+`src/st7789.cpp` over Arduino `SPI`. No TFT_eSPI, no Adafruit.
+
+This V1.1 module's 240×240 window starts at **row 0**, `MADCTL 0x00`. Serial:
+
+```
+[lcd] st7789 240x240 sck=18 mosi=23 dc=26 cs=27 rst=25 blk=32 row=0 col=0 madctl=0x00
+```
+
+If the picture is wrong, add one `-D` on the `esp32dev-st7789` `build_flags` (keep both existing `-D` lines) and reflash:
+
+| What you see | Flag |
+|---|---|
+| Black band on the bottom, image shoved up | `-D C67_ST7789_ROW_START=80` |
+| Upside down | `-D C67_ST7789_MADCTL=0xC0` |
+| Red and blue swapped | `-D C67_ST7789_MADCTL=0x08` |
+
+Idle: eyes look around and blink, plus `Hi, beautiful` / `My name is <name>` (name clipped to 9 glyphs). `event=correct`: squint, smile, sparkle, `:)  NICE WORK!` / `you got it`. `event=incorrect`: soft sway, `almost there` / `try once more`. No red, no X, no frown. MQTT down: heavier lids, same as the OLED.
+
+```bash
+pio run -d firmware/esp32 -e esp32dev-st7789 -t upload --upload-port /dev/cu.usbserial-0001
+```
+
 Incorrect reactions are gentle (soft LED + rising tone + encouraging face/text). Correct
 reactions are upbeat. Intensity is clamped to 1–5.
 
@@ -132,28 +178,30 @@ reactions are upbeat. Intensity is clamped to 1–5.
 
 Compile-time (`-D C67_LCD_TYPE=<int>`), not `secrets.h`. Bare `pio run` is type `1`.
 
-| `C67_LCD_TYPE` | PlatformIO env | Panel | VCC | I2C | Driver |
+| `C67_LCD_TYPE` | PlatformIO env | Panel | VCC | Bus | Driver |
 |---|---|---|---|---|---|
-| `1` | `esp32dev` (default) | 0.96" SSD1306 128×64 | 3.3 V | `0x3C` / `0x3D` | `src/ssd1306.cpp` |
-| `2` | `esp32dev-lcd1602` | 16×2 PCF8574A (`0x3F`) / PCF8574 (`0x27`); Gravity only if `0x3E`+RGB | **5 V** / 3.3–5 V | see row | `src/lcd1602.cpp` |
-| `3+` | `esp32dev-<name>` | next panel | per module | per module | `src/<chip>.cpp` |
+| `1` | `esp32dev` (default) | 0.96" SSD1306 128×64 | 3.3 V | I2C `0x3C` / `0x3D` | `src/ssd1306.cpp` |
+| `2` | `esp32dev-lcd1602` | 16×2 PCF8574A (`0x3F`) / PCF8574 (`0x27`); Gravity only if `0x3E`+RGB | **5 V** / 3.3–5 V | I2C, see row | `src/lcd1602.cpp` |
+| `3` | `esp32dev-st7789` | 1.54" ST7789 240×240 SPI | **3.3 V** | SCK 18, MOSI 23, DC 26, CS 27, RST 25, BLK 32 | `src/st7789.cpp` |
+| `4+` | `esp32dev-<name>` | next panel | per module | per module | `src/<chip>.cpp` |
 
-SDA **21** / SCL **22** for every I2C panel. One module on the bus. `face.cpp` `#if`s on `C67_LCD_TYPE`. No extra PlatformIO libraries.
+SDA **21** / SCL **22** for every I2C panel. The ST7789 is not on that bus. One module driven per binary. `face.cpp` `#if`s on `C67_LCD_TYPE`. No extra PlatformIO libraries.
 
 ### Adding LCD type N
 
 1. Next unused int in `src/lcd_type.h` (`#define C67_LCD_… N`).
 2. New env in `platformio.ini` that `extends = env:esp32dev` and **repeats** both `-D MQTT_MAX_PACKET_SIZE=512` and `-D C67_LCD_TYPE=N` (`extends` replaces `build_flags`).
-3. `src/<chip>.h/.cpp` over `Wire`. Probe addresses at `Begin()`, log `[lcd] … addr=0x..` or an I2C scan. `delay()` only in `Begin()`.
+3. `src/<chip>.h/.cpp`. I2C panels use Arduino `Wire` and probe addresses at `Begin()` (`[lcd] … addr=0x..` or an I2C scan). SPI panels use Arduino `SPI` (type 3 does — there is no MISO to probe). `delay()` only in `Begin()`.
 4. `face.cpp` / `faceLcdName()`: idle + `correct` (upbeat) + `incorrect` (encouraging, never “wrong”).
 5. Wiring table + this registry row + the upload `-e` in this README.
-6. `pio run -d firmware/esp32 -e esp32dev -e esp32dev-lcd1602 -e esp32dev-<name>` — all three must stay green.
+6. `pio run -d firmware/esp32 -e esp32dev -e esp32dev-lcd1602 -e esp32dev-st7789 -e esp32dev-<name>` — every env must stay green.
 
 ## Build
 
 ```bash
 pio run -d firmware/esp32 -e esp32dev
 pio run -d firmware/esp32 -e esp32dev-lcd1602
+pio run -d firmware/esp32 -e esp32dev-st7789
 ```
 
 Serial must show `[ntp] synchronized` **before** `[mqtt] starting tls connection`.

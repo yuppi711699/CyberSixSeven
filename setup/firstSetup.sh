@@ -330,7 +330,7 @@ echo "==> model-gen-service venv ($PYTHON)"
 
 if command -v pio >/dev/null 2>&1; then
   echo "==> PlatformIO libs (no upload)"
-  if ! pio run -d firmware/esp32 -e esp32dev -e esp32dev-lcd1602; then
+  if ! pio run -d firmware/esp32 -e esp32dev -e esp32dev-lcd1602 -e esp32dev-st7789; then
     echo "pio build failed — firmware is optional; set WIFI in secrets.h and retry" >&2
   fi
 else

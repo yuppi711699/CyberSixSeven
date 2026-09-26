@@ -4,6 +4,8 @@
 
 #if C67_LCD_TYPE == C67_LCD_LCD1602
 #include "lcd1602.h"
+#elif C67_LCD_TYPE == C67_LCD_ST7789
+#include "st7789.h"
 #else
 #include "ssd1306.h"
 #endif
@@ -51,6 +53,235 @@ void showEncourage() {
   // Soft blue, never red — product rule.
   lcd1602SetRgb(40, 120, 255);
   lcd1602SetLines("almost there", "try once more");
+}
+
+#elif C67_LCD_TYPE == C67_LCD_ST7789
+
+constexpr int16_t kLeftCx = 70;
+constexpr int16_t kRightCx = 170;
+constexpr int16_t kEyeCy = 78;
+constexpr int16_t kEyeR = 34;
+constexpr int16_t kPupilR = 12;
+constexpr int16_t kTextScale = 2;
+constexpr int16_t kTextY0 = 168;
+constexpr int16_t kTextY1 = 198;
+constexpr uint32_t kFrameMs = 100;
+constexpr uint32_t kBlinkMs = 140;
+constexpr uint32_t kLookHoldMinMs = 900;
+constexpr uint32_t kLookHoldMaxMs = 2200;
+
+// rgb(8, 12, 24), rgb(0, 180, 40), rgb(40, 120, 255). Never red.
+constexpr uint16_t kBg = 0x0863;
+constexpr uint16_t kSclera = 0xFFFF;
+constexpr uint16_t kPupil = 0x0000;
+constexpr uint16_t kHappyText = 0x05A5;
+constexpr uint16_t kEncourageText = 0x2BDF;
+constexpr uint16_t kSparkle = 0xFEE7;
+
+uint32_t nextBlinkAtMs = 800;
+uint32_t blinkStartedAtMs = 0;
+bool blinking = false;
+int8_t lookX = 0;
+int8_t lookY = 0;
+int8_t lookTargetX = 0;
+int8_t lookTargetY = 0;
+uint32_t lookStartedAtMs = 0;
+uint32_t nextLookAtMs = 400;
+bool textDirty = true;
+
+bool displayReady() {
+  return st7789Ready();
+}
+
+int16_t clamp16(int16_t v, int16_t lo, int16_t hi) {
+  if (v < lo) {
+    return lo;
+  }
+  if (v > hi) {
+    return hi;
+  }
+  return v;
+}
+
+int16_t lerpToward(int16_t from, int16_t to, uint32_t elapsedMs, uint32_t spanMs) {
+  if (elapsedMs >= spanMs) {
+    return to;
+  }
+  const int32_t d = static_cast<int32_t>(to - from) * static_cast<int32_t>(elapsedMs)
+                    / static_cast<int32_t>(spanMs);
+  return static_cast<int16_t>(from + d);
+}
+
+uint32_t holdMs() {
+  return kLookHoldMinMs + (static_cast<uint32_t>(random(0, 1 + (kLookHoldMaxMs - kLookHoldMinMs))));
+}
+
+void eraseArt() {
+  // Eyes, smile, and sparkles live above the text. One band erase, then redraw.
+  // ~15 ms at 40 MHz — faceUpdate gates this to kFrameMs so MQTT still runs.
+  st7789FillRect(0, 4, kTftWidth, 156, kBg);
+}
+
+void drawCentered(int16_t y, const char* text, uint16_t color) {
+  const int16_t width = st7789TextWidth(text, static_cast<uint8_t>(kTextScale));
+  int16_t x = static_cast<int16_t>((kTftWidth - width) / 2);
+  if (x < 0) {
+    x = 0;
+  }
+  st7789DrawText(x, y, text, color, static_cast<uint8_t>(kTextScale));
+}
+
+void paintText() {
+  st7789FillRect(0, 162, kTftWidth, 74, kBg);
+  char line0[24];
+  char line1[24];
+  uint16_t color = kSclera;
+  switch (mode) {
+    case FaceMode::Happy:
+      snprintf(line0, sizeof(line0), ":)  NICE WORK!");
+      snprintf(line1, sizeof(line1), "you got it");
+      color = kHappyText;
+      break;
+    case FaceMode::Encourage:
+      snprintf(line0, sizeof(line0), "almost there");
+      snprintf(line1, sizeof(line1), "try once more");
+      color = kEncourageText;
+      break;
+    case FaceMode::Idle:
+    default:
+      snprintf(line0, sizeof(line0), "Hi, beautiful");
+      snprintf(line1, sizeof(line1), "My name is %.9s", profileName);
+      color = kSclera;
+      break;
+  }
+  drawCentered(kTextY0, line0, color);
+  drawCentered(kTextY1, line1, color);
+}
+
+void sparkle(int16_t x, int16_t y, uint32_t now) {
+  if (((now / 80) & 1u) == 0) {
+    return;
+  }
+  st7789FillRect(static_cast<int16_t>(x - 4), y, 9, 2, kSparkle);
+  st7789FillRect(static_cast<int16_t>(x - 1), static_cast<int16_t>(y - 3), 3, 8, kSparkle);
+}
+
+void drawSmile(int16_t cy) {
+  constexpr int16_t mid = 120;
+  for (int16_t x = -40; x <= 40; x = static_cast<int16_t>(x + 2)) {
+    const int16_t y = static_cast<int16_t>(cy + (x * x) / 110);
+    st7789FillRect(static_cast<int16_t>(mid + x), y, 3, 3, kSclera);
+  }
+}
+
+void drawOpenEye(int16_t cx, int16_t cy, int8_t pupilX, int8_t pupilY, int16_t lidClose) {
+  st7789FillCircle(cx, cy, kEyeR, kSclera);
+  const int16_t px = clamp16(static_cast<int16_t>(cx + pupilX), static_cast<int16_t>(cx - 10),
+                             static_cast<int16_t>(cx + 10));
+  const int16_t py = clamp16(static_cast<int16_t>(cy + pupilY), static_cast<int16_t>(cy - 6),
+                             static_cast<int16_t>(cy + 6));
+  st7789FillCircle(px, py, kPupilR, kPupil);
+  st7789FillCircle(static_cast<int16_t>(px - 5), static_cast<int16_t>(py - 5), 3, kSclera);
+  if (lidClose > 0) {
+    const int16_t h = clamp16(lidClose, 0, static_cast<int16_t>(kEyeR * 2));
+    st7789FillRect(static_cast<int16_t>(cx - kEyeR), static_cast<int16_t>(cy - kEyeR),
+                   static_cast<int16_t>(kEyeR * 2 + 1), h, kBg);
+  }
+}
+
+void drawHappyEye(int16_t cx, int16_t cy) {
+  st7789FillCircle(cx, cy, static_cast<int16_t>(kEyeR - 4), kSclera);
+  st7789FillCircle(cx, static_cast<int16_t>(cy - 16), static_cast<int16_t>(kEyeR - 4), kBg);
+}
+
+void drawEncourageEye(int16_t cx, int16_t cy, int8_t pupilX, int8_t pupilY, int16_t lidClose) {
+  st7789FillCircle(cx, cy, static_cast<int16_t>(kEyeR - 4), kSclera);
+  const int16_t px = clamp16(static_cast<int16_t>(cx + pupilX), static_cast<int16_t>(cx - 8),
+                             static_cast<int16_t>(cx + 8));
+  const int16_t py = clamp16(static_cast<int16_t>(cy + pupilY - 4), static_cast<int16_t>(cy - 8),
+                             static_cast<int16_t>(cy + 4));
+  st7789FillCircle(px, py, static_cast<int16_t>(kPupilR - 2), kPupil);
+  st7789FillCircle(static_cast<int16_t>(px - 4), static_cast<int16_t>(py - 4), 2, kSclera);
+  if (lidClose > 0) {
+    st7789FillRect(static_cast<int16_t>(cx - kEyeR), static_cast<int16_t>(cy - kEyeR),
+                   static_cast<int16_t>(kEyeR * 2 + 1), lidClose, kBg);
+  }
+}
+
+void pickLook(uint32_t now) {
+  lookStartedAtMs = now;
+  lookX = lookTargetX;
+  lookY = lookTargetY;
+  lookTargetX = static_cast<int8_t>(random(-10, 11));
+  lookTargetY = static_cast<int8_t>(random(-5, 6));
+  nextLookAtMs = now + holdMs();
+}
+
+int16_t currentLook(int8_t from, int8_t to, uint32_t now) {
+  return lerpToward(from, to, now - lookStartedAtMs, 180);
+}
+
+int16_t blinkLid(uint32_t now) {
+  if (!blinking) {
+    return 0;
+  }
+  const uint32_t t = now - blinkStartedAtMs;
+  if (t >= kBlinkMs) {
+    blinking = false;
+    nextBlinkAtMs = now + 1800 + static_cast<uint32_t>(random(0, 1800));
+    return 0;
+  }
+  if (t < kBlinkMs / 2) {
+    return static_cast<int16_t>((t * (kEyeR * 2)) / (kBlinkMs / 2));
+  }
+  const uint32_t back = kBlinkMs - t;
+  return static_cast<int16_t>((back * (kEyeR * 2)) / (kBlinkMs / 2));
+}
+
+void startBlink(uint32_t now) {
+  blinking = true;
+  blinkStartedAtMs = now;
+}
+
+void drawIdle(uint32_t now, bool mqttReady) {
+  if (now >= nextLookAtMs) {
+    pickLook(now);
+  }
+  if (!blinking && now >= nextBlinkAtMs) {
+    startBlink(now);
+  }
+  const int16_t lx = currentLook(lookX, lookTargetX, now);
+  const int16_t ly = currentLook(lookY, lookTargetY, now);
+  int16_t lid = blinkLid(now);
+  if (!mqttReady && lid < 20) {
+    lid = 20;
+  }
+  drawOpenEye(kLeftCx, kEyeCy, static_cast<int8_t>(lx), static_cast<int8_t>(ly), lid);
+  drawOpenEye(kRightCx, kEyeCy, static_cast<int8_t>(lx), static_cast<int8_t>(ly), lid);
+}
+
+void drawHappy(uint32_t now) {
+  const uint32_t t = now - modeStartedAtMs;
+  const int16_t hop = static_cast<int16_t>(t % 360);
+  const int16_t bounce = static_cast<int16_t>(hop < 180 ? (180 - hop) / 12 : (hop - 180) / 12);
+  const int16_t cy = static_cast<int16_t>(kEyeCy - bounce);
+  drawHappyEye(kLeftCx, cy);
+  drawHappyEye(kRightCx, cy);
+  drawSmile(static_cast<int16_t>(124 - bounce / 2));
+  sparkle(36, 14, now);
+  sparkle(204, 16, now);
+  sparkle(120, 10, now);
+}
+
+void drawEncourage(uint32_t now) {
+  const uint32_t t = now - modeStartedAtMs;
+  const int16_t sway = static_cast<int16_t>(((t / 120) % 10) < 5 ? -6 : 6);
+  if (!blinking && now >= nextBlinkAtMs) {
+    startBlink(now);
+  }
+  const int16_t lid = blinkLid(now);
+  drawEncourageEye(static_cast<int16_t>(kLeftCx + sway), kEyeCy, 0, -2, lid);
+  drawEncourageEye(static_cast<int16_t>(kRightCx + sway), kEyeCy, 0, -2, lid);
 }
 
 #else
@@ -233,6 +464,8 @@ void drawEncourage(uint32_t now) {
 const char* faceLcdName() {
 #if C67_LCD_TYPE == C67_LCD_LCD1602
   return "lcd1602";
+#elif C67_LCD_TYPE == C67_LCD_ST7789
+  return "st7789";
 #else
   return "ssd1306";
 #endif
@@ -241,9 +474,12 @@ const char* faceLcdName() {
 void faceSetProfileName(const char* name) {
   if (name == nullptr || name[0] == '\0') {
     snprintf(profileName, sizeof(profileName), "Bob");
-    return;
+  } else {
+    snprintf(profileName, sizeof(profileName), "%s", name);
   }
-  snprintf(profileName, sizeof(profileName), "%s", name);
+#if C67_LCD_TYPE == C67_LCD_ST7789
+  textDirty = true;
+#endif
 }
 
 void faceBegin() {
@@ -260,6 +496,28 @@ void faceBegin() {
   Serial.printf("[lcd] Hi, beautiful student. My name is %s\n", profileName);
   lastFrameAtMs = 0;
   showGreeting();
+#elif C67_LCD_TYPE == C67_LCD_ST7789
+  if (!st7789Begin()) {
+    return;
+  }
+  Serial.printf("[lcd] st7789 240x240 sck=%u mosi=%u dc=%u cs=%u rst=%u blk=%u row=%u col=%u madctl=0x%02X\n",
+                static_cast<unsigned>(kTftSckPin),
+                static_cast<unsigned>(kTftMosiPin),
+                static_cast<unsigned>(kTftDcPin),
+                static_cast<unsigned>(kTftCsPin),
+                static_cast<unsigned>(kTftRstPin),
+                static_cast<unsigned>(kTftBlPin),
+                static_cast<unsigned>(C67_ST7789_ROW_START),
+                static_cast<unsigned>(C67_ST7789_COL_START),
+                static_cast<unsigned>(C67_ST7789_MADCTL));
+  Serial.printf("[lcd] Hi, beautiful student. My name is %s\n", profileName);
+  st7789FillScreen(kBg);
+  const uint32_t now = millis();
+  nextBlinkAtMs = now + 600;
+  nextLookAtMs = now + 200;
+  lastFrameAtMs = 0;
+  textDirty = true;
+  facePlayHappy(2);
 #else
   if (!ssd1306Begin()) {
     Serial.println("[oled] not found on 0x3C/0x3D — check VCC/GND/SDA=21/SCL=22");
@@ -288,6 +546,9 @@ void facePlayHappy(uint8_t intensity) {
 #if C67_LCD_TYPE != C67_LCD_LCD1602
   blinking = false;
 #endif
+#if C67_LCD_TYPE == C67_LCD_ST7789
+  textDirty = true;
+#endif
 }
 
 void facePlayEncourage(uint8_t intensity) {
@@ -302,6 +563,9 @@ void facePlayEncourage(uint8_t intensity) {
   blinking = false;
   nextBlinkAtMs = modeStartedAtMs + 180;
 #endif
+#if C67_LCD_TYPE == C67_LCD_ST7789
+  textDirty = true;
+#endif
 }
 
 void faceUpdate(uint32_t now, bool mqttReady) {
@@ -314,6 +578,9 @@ void faceUpdate(uint32_t now, bool mqttReady) {
 #if C67_LCD_TYPE != C67_LCD_LCD1602
     nextBlinkAtMs = now + 400;
     nextLookAtMs = now + 200;
+#endif
+#if C67_LCD_TYPE == C67_LCD_ST7789
+    textDirty = true;
 #endif
   }
   if (lastFrameAtMs != 0 && now - lastFrameAtMs < kFrameMs) {
@@ -332,6 +599,24 @@ void faceUpdate(uint32_t now, bool mqttReady) {
     case FaceMode::Idle:
     default:
       showIdle(now, mqttReady);
+      break;
+  }
+#elif C67_LCD_TYPE == C67_LCD_ST7789
+  if (textDirty) {
+    paintText();
+    textDirty = false;
+  }
+  eraseArt();
+  switch (mode) {
+    case FaceMode::Happy:
+      drawHappy(now);
+      break;
+    case FaceMode::Encourage:
+      drawEncourage(now);
+      break;
+    case FaceMode::Idle:
+    default:
+      drawIdle(now, mqttReady);
       break;
   }
 #else

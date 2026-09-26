@@ -88,13 +88,14 @@ pnpm --filter @cybersixseven/admin-web dev
 ```
 
 ```bash
-# ESP32 firmware — default env is SSD1306. 1602: -e esp32dev-lcd1602
+# ESP32 firmware — default env is SSD1306. 1602: -e esp32dev-lcd1602. 1.54" ST7789: -e esp32dev-st7789
 # Upload/wiring: firmware/esp32/README.md
 pio run -d firmware/esp32
 pio run -d firmware/esp32 -e esp32dev-lcd1602
+pio run -d firmware/esp32 -e esp32dev-st7789
 ```
 
-Students answer questions in a web app. The platform scores the attempt, drives a small companion device (LED, buzzer, motor, LCD), and generates a downloadable 3D-printable accessory for the result. LCD type is a PlatformIO env (`C67_LCD_TYPE`): SSD1306 OLED or 1602 + I2C backpack today — see `firmware/esp32/README.md`.
+Students answer questions in a web app. The platform scores the attempt, drives a small companion device (LED, buzzer, motor, LCD), and generates a downloadable 3D-printable accessory for the result. LCD type is a PlatformIO env (`C67_LCD_TYPE`): SSD1306 OLED, 1602 + I2C backpack, or 1.54" ST7789 SPI — see `firmware/esp32/README.md`.
 
 The device is an ESP32 that talks MQTT over mutual TLS. Everything else — identity, questions, scoring, the event pipeline, and the accessory file — lives in this repo. There is no firmware flashing required to run the web and API stack.
 

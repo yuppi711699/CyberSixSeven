@@ -2,8 +2,9 @@
 
 #include <Arduino.h>
 
-// Companion-device display. SSD1306 = eyes; LCD1602 = 16x2 text. Timing is
-// millis()-based; never delay() — a blocking frame stall would drop MQTT keepalive.
+// Companion-device display. SSD1306 = eyes; LCD1602 = 16x2 text;
+// ST7789 = those eyes, scaled, plus the 1602 lines. Timing is millis()-based;
+// never delay() — a blocking frame stall would drop MQTT keepalive.
 
 void faceBegin();
 void faceSetProfileName(const char* name);
