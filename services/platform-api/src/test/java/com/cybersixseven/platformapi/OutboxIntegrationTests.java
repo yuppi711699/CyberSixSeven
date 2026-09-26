@@ -149,6 +149,8 @@ class OutboxIntegrationTests extends PostgresIntegrationTest {
         assertEquals("correct", published.get("event").asText());
         assertEquals(3, published.get("intensity").asInt());
         assertEquals("application/json", guessNotSnsEnvelope(captor.getValue().message()));
+        assertEquals(1, captor.getValue().messageAttributes().size());
+        assertTrue(captor.getValue().messageAttributes().containsKey(OutboxPublisher.SNS_PUBLISHED_AT));
     }
 
     @Test

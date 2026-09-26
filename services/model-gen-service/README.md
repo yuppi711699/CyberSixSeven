@@ -3,8 +3,10 @@
 Python service whose only job is generating `.stl` files, uploading them to a
 private bucket, and telling `platform-api` the deterministic object key.
 
-**v0.4 scope:** parametric accessory geometry, SQS consumer for `model-gen-jobs`,
-private S3 upload, authenticated internal PATCH. No OpenTelemetry yet (v0.7).
+**v0.7 scope:** parametric accessory geometry, SQS consumer for `model-gen-jobs`,
+private S3 upload, authenticated internal PATCH, and OpenTelemetry
+(`opentelemetry-sdk` 1.44.0 + `opentelemetry-instrumentation-boto3sqs` 0.65b0).
+The consumer exports OTLP to Jaeger unless `OTEL_SDK_DISABLED=true`.
 
 ---
 

@@ -203,7 +203,19 @@ infra/local/mosquitto/certs/generate-certs.sh
 docker compose up -d
 ```
 
-That starts Postgres 17 (`5432`), Redis 7 (`6379`), LocalStack 4.7 (`4566`: SNS, SQS, DynamoDB, S3), and Mosquitto (`8883`). LocalStack’s init script creates the topic, both queues and their dead-letter queues, the `device_events` table, and the private `cybersixseven-accessories` bucket. `docker compose down -v && docker compose up -d` rebuilds all of that.
+That starts Postgres 17 (`5432`), Redis 7 (`6379`), LocalStack 4.7 (`4566`: SNS, SQS, DynamoDB, S3), Mosquitto (`8883`), and Jaeger (`16686` UI, `4317` OTLP). LocalStack’s init script creates the topic, both queues and their dead-letter queues, the `device_events` table, and the private `cybersixseven-accessories` bucket. `docker compose down -v && docker compose up -d` rebuilds all of that.
+
+Attach the OpenTelemetry javaagent `2.31.1` (not the Spring starter) when you want traces in Jaeger. Metrics stay on `/actuator/metrics`; the agent exports traces only.
+
+```bash
+AGENT="$(./setup/fetch-otel-agent.sh)"
+set -a && source .env && source infra/local/otel.env && set +a
+export JAVA_TOOL_OPTIONS="-javaagent:${AGENT}"
+export OTEL_SERVICE_NAME=platform-api
+./services/mvnw -f services/platform-api/pom.xml spring-boot:run -Dspring-boot.run.profiles=local
+```
+
+Use `OTEL_SERVICE_NAME=device-command-service` and `reward-service` for the other JVMs. `model-gen-service` uses the Python SDK (`OTEL_SERVICE_NAME=model-gen-service`); leave `OTEL_SDK_DISABLED` unset. Queue consumers start a new trace linked to the producer. The ESP32 is correlated by `commandId`, not by a span.
 
 ```bash
 docker compose ps

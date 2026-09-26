@@ -34,6 +34,9 @@ __pycache__/
 # PlatformIO
 .pio/
 
+# OpenTelemetry javaagent — downloaded by setup/fetch-otel-agent.sh
+tools/*.jar
+
 # Terraform — tfstate contains secrets in plaintext
 .terraform/
 *.tfstate

@@ -17,6 +17,34 @@ from app.io import AccessoryIo, accessory_key, aws_client, io_from_env
 log = logging.getLogger("model-gen-service")
 
 GenerateFn = Callable[..., Path]
+_tracing_configured = False
+
+
+def configure_tracing() -> bool:
+    """Install SQS propagation. Returns False when the SDK is explicitly disabled (tests)."""
+    global _tracing_configured
+    if os.environ.get("OTEL_SDK_DISABLED", "").lower() == "true":
+        return False
+    if _tracing_configured:
+        return True
+    from opentelemetry import trace
+    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+    from opentelemetry.instrumentation.boto3sqs import Boto3SQSInstrumentor
+    from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+    service = os.environ.get("OTEL_SERVICE_NAME", "model-gen-service")
+    endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4317")
+    provider = TracerProvider(resource=Resource.create({"service.name": service}))
+    provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint, insecure=True)))
+    trace.set_tracer_provider(provider)
+    # botocore does not propagate SQS. boto3sqs extracts context and starts a linked trace.
+    BotocoreInstrumentor().instrument()
+    Boto3SQSInstrumentor().instrument()
+    _tracing_configured = True
+    return True
 
 
 @dataclass(frozen=True)
@@ -95,7 +123,8 @@ def handle_received(
 
 
 def poll_forever(io: AccessoryIo | None = None) -> None:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    configure_tracing()
     queue_url = os.environ["MODEL_GEN_QUEUE_URL"]
     endpoint = os.environ.get("AWS_ENDPOINT_URL") or os.environ.get("AWS_ENDPOINT") or None
     region = os.environ.get("AWS_REGION", "us-west-2")
@@ -129,12 +158,26 @@ def _peek_submission_id(body: str) -> str:
 
 
 def _log(job: Job, receive_count: int, stage: str) -> None:
+    trace_id = None
+    try:
+        from opentelemetry import trace
+
+        span = trace.get_current_span().get_span_context()
+        if span.is_valid:
+            trace_id = format(span.trace_id, "032x")
+    except ImportError:
+        trace_id = None
     log.info(
-        "stage=%s submissionId=%s commandId=%s receiveCount=%s",
-        stage,
-        job.submission_id,
-        job.command_id,
-        receive_count,
+        json.dumps(
+            {
+                "service.name": "model-gen-service",
+                "stage": stage,
+                "submissionId": job.submission_id,
+                "commandId": job.command_id,
+                "receiveCount": receive_count,
+                "trace_id": trace_id,
+            }
+        )
     )
 
 

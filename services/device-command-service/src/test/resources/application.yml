@@ -1,6 +1,20 @@
 server:
   port: 0
 
+logging:
+  structured:
+    format:
+      console: ecs
+    ecs:
+      service:
+        name: device-command-service
+    json:
+      context:
+        include: true
+        prefix: ""
+      customizer:
+        - com.cybersixseven.devicecommandservice.observability.RedactingLogCustomizer
+
 spring:
   task:
     scheduling:

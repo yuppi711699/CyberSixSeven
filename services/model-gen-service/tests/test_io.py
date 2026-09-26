@@ -32,7 +32,10 @@ def test_accessory_key_rejects_non_uuid() -> None:
 def s3_io(submission_id: str):
     with mock_aws():
         s3 = boto3.client("s3", region_name="us-west-2")
-        s3.create_bucket(Bucket="cybersixseven-accessories")
+        s3.create_bucket(
+            Bucket="cybersixseven-accessories",
+            CreateBucketConfiguration={"LocationConstraint": "us-west-2"},
+        )
         calls: list[tuple[str, str]] = []
 
         def notify(sid: str, key: str) -> None:

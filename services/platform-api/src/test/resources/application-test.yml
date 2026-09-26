@@ -29,6 +29,13 @@ app:
     device-command:
       connect-timeout: 500ms
       deadline: 2s
+  rate-limit:
+    auth:
+      capacity: 100000
+      window: 1m
+    submission:
+      capacity: 100000
+      window: 1m
   aws:
     region: us-west-2
     endpoint: http://127.0.0.1:1

@@ -337,6 +337,10 @@ else
   echo "==> PlatformIO not on PATH (skip). Web/API stack does not need it."
 fi
 
+echo "==> OpenTelemetry javaagent 2.31.1"
+chmod +x "$ROOT/setup/fetch-otel-agent.sh"
+"$ROOT/setup/fetch-otel-agent.sh" >/dev/null
+
 echo
 echo "firstSetup done. Processes are not running yet."
 echo

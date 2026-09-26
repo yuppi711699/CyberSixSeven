@@ -3,6 +3,8 @@ package com.cybersixseven.devicecommandservice.mqtt;
 import com.cybersixseven.devicecommandservice.command.DeviceCommandMessage;
 import com.cybersixseven.devicecommandservice.dynamodb.DeviceEventStore;
 import com.cybersixseven.devicecommandservice.heartbeat.PlatformHeartbeatClient;
+import com.cybersixseven.devicecommandservice.observability.Correlation;
+import com.cybersixseven.devicecommandservice.observability.PipelineMeters;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.UUID;
@@ -36,6 +38,7 @@ public class PahoMqttCommandBridge
   private final DeviceEventStore deviceEventStore;
   private final PlatformHeartbeatClient heartbeatClient;
   private final ObjectMapper objectMapper;
+  private final PipelineMeters meters;
   private final String brokerUrl;
   private final String clientId;
   private final Path caCert;
@@ -49,6 +52,7 @@ public class PahoMqttCommandBridge
       DeviceEventStore deviceEventStore,
       PlatformHeartbeatClient heartbeatClient,
       ObjectMapper objectMapper,
+      PipelineMeters meters,
       @Value("${app.mqtt.broker-url}") String brokerUrl,
       @Value("${app.mqtt.client-id}") String clientId,
       @Value("${app.mqtt.ca-cert-path}") String caCertPath,
@@ -59,6 +63,7 @@ public class PahoMqttCommandBridge
     this.deviceEventStore = deviceEventStore;
     this.heartbeatClient = heartbeatClient;
     this.objectMapper = objectMapper;
+    this.meters = meters;
     this.brokerUrl = brokerUrl;
     this.clientId = clientId;
     this.caCert = Path.of(caCertPath);
@@ -98,11 +103,13 @@ public class PahoMqttCommandBridge
       message.setQos(1);
       message.setRetained(false);
       client.publish(command.commandTopic(), message).waitForCompletion(completionTimeoutMs);
-      log.info(
-          "mqtt published commandId={} submissionId={} deviceId={}",
-          command.commandId(),
-          command.submissionId(),
-          command.deviceId());
+      meters.mqttPublished(command.commandId().toString());
+      Correlation.put(command.submissionId(), command.commandId(), command.deviceId());
+      try {
+        log.info("mqtt published");
+      } finally {
+        Correlation.clear();
+      }
     } catch (MqttException ex) {
       throw new IllegalStateException(
           "mqtt publish failed commandId=" + command.commandId(), ex);
@@ -135,13 +142,13 @@ public class PahoMqttCommandBridge
       UUID.fromString(commandId);
       UUID.fromString(submissionId);
       boolean acked = deviceEventStore.markAcknowledged(commandId);
-      log.info(
-          "mqtt ack commandId={} submissionId={} deviceId={} status={} recorded={}",
-          commandId,
-          submissionId,
-          deviceId,
-          status,
-          acked);
+      meters.mqttAck(commandId);
+      Correlation.put(UUID.fromString(submissionId), UUID.fromString(commandId), deviceId);
+      try {
+        log.info("mqtt ack status={} recorded={}", status, acked);
+      } finally {
+        Correlation.clear();
+      }
       heartbeatClient.report(deviceId, submissionId, commandId, status);
     } catch (RuntimeException ex) {
       log.error("mqtt status handling failed topic={}", topic, ex);

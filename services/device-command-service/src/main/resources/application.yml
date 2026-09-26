@@ -5,11 +5,25 @@ spring:
   application:
     name: device-command-service
 
+logging:
+  structured:
+    format:
+      console: ecs
+    ecs:
+      service:
+        name: device-command-service
+    json:
+      context:
+        include: true
+        prefix: ""
+      customizer:
+        - com.cybersixseven.devicecommandservice.observability.RedactingLogCustomizer
+
 management:
   endpoints:
     web:
       exposure:
-        include: health
+        include: health,metrics
   endpoint:
     health:
       probes:

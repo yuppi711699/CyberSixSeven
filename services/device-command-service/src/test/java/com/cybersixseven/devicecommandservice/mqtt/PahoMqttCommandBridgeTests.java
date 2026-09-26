@@ -7,6 +7,8 @@ import static org.mockito.Mockito.when;
 
 import com.cybersixseven.devicecommandservice.dynamodb.DeviceEventStore;
 import com.cybersixseven.devicecommandservice.heartbeat.PlatformHeartbeatClient;
+import com.cybersixseven.devicecommandservice.observability.PipelineMeters;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import org.eclipse.paho.mqttv5.common.MqttMessage;
@@ -38,6 +40,7 @@ class PahoMqttCommandBridgeTests {
         deviceEventStore,
         heartbeatClient,
         new JsonMapper(),
+        new PipelineMeters(new SimpleMeterRegistry()),
         "ssl://127.0.0.1:1",
         "test-client",
         "/tmp/ca.crt",

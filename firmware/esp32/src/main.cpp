@@ -14,6 +14,7 @@
 
 #include "face.h"
 #include "lcd_type.h"
+#include "reliability.h"
 #include "../secrets.h"
 
 #ifndef C67_SECRETS_HAS_MQTT
@@ -40,23 +41,18 @@ constexpr uint32_t kWifiRetryIntervalMs = 5000;
 constexpr uint32_t kStatusLogIntervalMs = 2000;
 constexpr uint32_t kNtpWaitLogIntervalMs = 2000;
 constexpr time_t kMinUnixTime = 1700000000;
-constexpr uint32_t kMqttBackoffMinMs = 1000;
-constexpr uint32_t kMqttBackoffMaxMs = 30000;
 constexpr uint16_t kMqttBuffer = 512;
-constexpr uint8_t kCommandRingSize = 64;
 constexpr uint8_t kLedcChannel = 0;
 constexpr uint8_t kLedcResolution = 8;
 
 constexpr char kNvsNamespace[] = "c67cmd";
 constexpr char kNvsBlobKey[] = "ring";
 
-enum class NetPhase : uint8_t { Wifi, Ntp, Mqtt, Ready };
-
-struct CommandRing {
-  uint8_t next;
-  uint8_t count;
-  char ids[kCommandRingSize][37];
-};
+using c67::CommandRing;
+using c67::NetPhase;
+using c67::PayloadReject;
+using c67::kMqttBackoffMaxMs;
+using c67::kMqttBackoffMinMs;
 
 struct PendingCommand {
   bool ready;
@@ -131,7 +127,7 @@ const char* wifiStatusName(int status) {
 void loadRing() {
   prefs.begin(kNvsNamespace, false);
   const size_t n = prefs.getBytes(kNvsBlobKey, &ring, sizeof(ring));
-  if (n != sizeof(ring) || ring.count > kCommandRingSize || ring.next >= kCommandRingSize) {
+  if (n != sizeof(ring) || !c67::ringValid(ring)) {
     ring = CommandRing{};
   }
 }
@@ -141,22 +137,11 @@ void saveRing() {
 }
 
 bool ringContains(const char* commandId) {
-  const uint8_t n = ring.count;
-  for (uint8_t i = 0; i < n; ++i) {
-    if (strncmp(ring.ids[i], commandId, 36) == 0) {
-      return true;
-    }
-  }
-  return false;
+  return c67::ringContains(ring, commandId);
 }
 
 void ringRemember(const char* commandId) {
-  strncpy(ring.ids[ring.next], commandId, 36);
-  ring.ids[ring.next][36] = '\0';
-  ring.next = static_cast<uint8_t>((ring.next + 1) % kCommandRingSize);
-  if (ring.count < kCommandRingSize) {
-    ring.count++;
-  }
+  c67::ringRemember(ring, commandId);
   saveRing();
 }
 
@@ -277,23 +262,30 @@ void onMqttMessage(char* topic, byte* payload, unsigned int length) {
     return;
   }
   const char* event = doc["event"].as<const char*>();
-  if (strcmp(event, "correct") != 0 && strcmp(event, "incorrect") != 0) {
+  const bool intensityIsInt = doc["intensity"].is<int>();
+  const int rawIntensity = intensityIsInt ? doc["intensity"].as<int>() : 0;
+  const PayloadReject reject = c67::acceptCommand(
+      doc["commandId"].is<const char*>() ? doc["commandId"].as<const char*>() : nullptr,
+      doc["submissionId"].is<const char*>() ? doc["submissionId"].as<const char*>() : nullptr,
+      doc["event"].is<const char*>() ? event : nullptr,
+      intensityIsInt,
+      rawIntensity);
+  if (reject == PayloadReject::MissingField) {
+    Serial.println("[mqtt] missing command fields");
+    return;
+  }
+  if (reject == PayloadReject::UnknownEvent) {
     Serial.println("[mqtt] unknown event");
+    return;
+  }
+  if (reject == PayloadReject::Intensity) {
+    Serial.printf("[mqtt] intensity out of range=%d\n", rawIntensity);
     return;
   }
   copyField(pending.commandId, sizeof(pending.commandId), doc["commandId"].as<const char*>());
   copyField(pending.submissionId, sizeof(pending.submissionId), doc["submissionId"].as<const char*>());
   copyField(pending.event, sizeof(pending.event), event);
-  const int rawIntensity = doc["intensity"].as<int>();
-  if (rawIntensity < 1 || rawIntensity > 5) {
-    Serial.printf("[mqtt] intensity out of range=%d\n", rawIntensity);
-    return;
-  }
   pending.intensity = static_cast<uint8_t>(rawIntensity);
-  if (pending.commandId[0] == '\0' || pending.submissionId[0] == '\0') {
-    pending.ready = false;
-    return;
-  }
   pending.ready = true;
 }
 
@@ -366,7 +358,7 @@ bool connectMqtt(uint32_t now) {
   mqtt.setCallback(onMqttMessage);
   const bool ok = mqtt.connect(DEVICE_ID);
   if (!ok) {
-    mqttBackoffMs = min(kMqttBackoffMaxMs, mqttBackoffMs * 2);
+    mqttBackoffMs = c67::nextMqttBackoff(mqttBackoffMs);
     const uint32_t jitter = static_cast<uint32_t>(random(0, mqttBackoffMs / 4 + 1));
     nextMqttAttemptAtMs = now + mqttBackoffMs + jitter;
     Serial.printf("[mqtt] connect failed rc=%d retry-ms=%lu\n",
@@ -456,8 +448,8 @@ void setup() {
 void loop() {
   const uint32_t now = millis();
   const bool wifiUp = maintainWifi(now);
+  phase = c67::phaseAfterWifi(wifiUp, phase);
   if (!wifiUp) {
-    phase = NetPhase::Wifi;
     ntpStarted = false;
     subscribed = false;
     updateEffect(now);
@@ -466,9 +458,6 @@ void loop() {
     return;
   }
 
-  if (phase == NetPhase::Wifi) {
-    phase = NetPhase::Ntp;
-  }
   if (phase == NetPhase::Ntp) {
     if (!ntpReady(now)) {
       updateEffect(now);
@@ -476,7 +465,7 @@ void loop() {
       faceUpdate(now, false);
       return;
     }
-    phase = NetPhase::Mqtt;
+    phase = c67::phaseAfterClock(true, phase);
   }
 
   if (phase == NetPhase::Mqtt) {

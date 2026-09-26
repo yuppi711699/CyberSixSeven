@@ -1,5 +1,8 @@
 server:
   port: 8080
+  # ALB terminates TLS. ForwardedHeaderFilter copies X-Forwarded-For onto remoteAddr
+  # before the API chain, so rate-limit keys are the client IP rather than the ALB.
+  forward-headers-strategy: framework
 
 spring:
   grpc:
@@ -48,7 +51,27 @@ management:
   endpoints:
     web:
       exposure:
-        include: health
+        include: health,metrics
+
+# bucket4j-spring-boot-starter 0.14.0 is present for the pinned coordinate.
+# Its servlet auto-config targets Boot 4.0.3 and cannot key IP and user separately.
+# ApiRateLimitFilter uses bucket4j_jdk17-core instead.
+bucket4j:
+  enabled: false
+
+logging:
+  structured:
+    format:
+      console: ecs
+    ecs:
+      service:
+        name: platform-api
+    json:
+      context:
+        include: true
+        prefix: ""
+      customizer:
+        - com.cybersixseven.platformapi.observability.RedactingLogCustomizer
 
 # Exact origins only — never "*". Credentials stay on for later cookie/auth flows.
 # Comma-separated for @Value String[] binding. Required — set in repo-root .env (see .env.example).
@@ -93,6 +116,14 @@ app:
     poll-interval-ms: ${OUTBOX_POLL_INTERVAL_MS:2000}
     lease-seconds: ${OUTBOX_LEASE_SECONDS:30}
     batch-size: ${OUTBOX_BATCH_SIZE:20}
+    lag-sample-ms: ${OUTBOX_LAG_SAMPLE_MS:5000}
+  rate-limit:
+    auth:
+      capacity: ${AUTH_RATE_LIMIT_CAPACITY:60}
+      window: ${AUTH_RATE_LIMIT_WINDOW:1m}
+    submission:
+      capacity: ${SUBMISSION_RATE_LIMIT_CAPACITY:30}
+      window: ${SUBMISSION_RATE_LIMIT_WINDOW:1m}
   aws:
     region: ${AWS_REGION:us-west-2}
     endpoint: ${AWS_ENDPOINT:}

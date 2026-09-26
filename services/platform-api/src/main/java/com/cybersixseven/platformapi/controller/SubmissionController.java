@@ -5,9 +5,11 @@ import com.cybersixseven.platformapi.dto.CreateSubmissionRequest;
 import com.cybersixseven.platformapi.dto.CreateSubmissionResponse;
 import com.cybersixseven.platformapi.dto.SubmissionDetailResponse;
 import com.cybersixseven.platformapi.entity.UserRole;
+import com.cybersixseven.platformapi.observability.PlatformMeters;
 import com.cybersixseven.platformapi.service.AccessoryDownloadService;
 import com.cybersixseven.platformapi.service.AuthUnauthorizedException;
 import com.cybersixseven.platformapi.service.SubmissionService;
+import io.micrometer.core.instrument.Timer;
 import java.net.URI;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -31,18 +33,27 @@ public class SubmissionController {
 
     private final SubmissionService submissionService;
     private final AccessoryDownloadService accessoryDownloadService;
+    private final PlatformMeters meters;
 
     public SubmissionController(
-            SubmissionService submissionService, AccessoryDownloadService accessoryDownloadService) {
+            SubmissionService submissionService,
+            AccessoryDownloadService accessoryDownloadService,
+            PlatformMeters meters) {
         this.submissionService = submissionService;
         this.accessoryDownloadService = accessoryDownloadService;
+        this.meters = meters;
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public CreateSubmissionResponse createSubmission(
             @RequestBody CreateSubmissionRequest request, @AuthenticationPrincipal Jwt jwt) {
-        return submissionService.submit(request, userId(jwt));
+        Timer.Sample sample = Timer.start();
+        try {
+            return submissionService.submit(request, userId(jwt));
+        } finally {
+            sample.stop(meters.submissionLatency());
+        }
     }
 
     @GetMapping("/{id}")

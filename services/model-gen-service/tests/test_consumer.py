@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock
@@ -36,7 +37,10 @@ def _fake_stl() -> Path:
 def stack():
     with mock_aws():
         s3 = boto3.client("s3", region_name="us-west-2")
-        s3.create_bucket(Bucket="cybersixseven-accessories")
+        s3.create_bucket(
+            Bucket="cybersixseven-accessories",
+            CreateBucketConfiguration={"LocationConstraint": "us-west-2"},
+        )
         sqs = boto3.client("sqs", region_name="us-west-2")
         dlq_url = sqs.create_queue(QueueName="model-gen-jobs-dlq")["QueueUrl"]
         dlq_arn = sqs.get_queue_attributes(QueueUrl=dlq_url, AttributeNames=["QueueArn"])["Attributes"][
@@ -69,6 +73,87 @@ def stack():
             "notifies": notifies,
             "uploads": uploads,
         }
+
+
+def test_existing_object_is_detected_with_head_and_skips_generation(stack, submission_id: str) -> None:
+    key = accessory_key(submission_id)
+    stack["s3"].put_object(Bucket="cybersixseven-accessories", Key=key, Body=b"solid already\nendsolid already\n")
+    heads: list[str] = []
+    original = stack["io"].object_exists
+
+    def tracking_exists(object_key: str) -> bool:
+        heads.append(object_key)
+        return original(object_key)
+
+    stack["io"].object_exists = tracking_exists  # type: ignore[method-assign]
+    generate = Mock(side_effect=_fake_stl)
+    process_message(_job_body(submission_id), receive_count=1, io=stack["io"], generate=generate)
+    assert heads == [key]
+    assert generate.call_count == 0
+    assert stack["uploads"] == []
+    assert stack["notifies"] == [(submission_id, key)]
+
+
+def test_configure_tracing_is_disabled_for_tests() -> None:
+    from app.consumer import configure_tracing
+
+    assert configure_tracing() is False
+
+
+def test_parse_job_requires_submission_id() -> None:
+    with pytest.raises(ValueError, match="submissionId"):
+        parse_job("{}")
+
+
+def test_process_message_logs_submission_and_command(stack, submission_id: str, caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    caplog.set_level(logging.INFO, logger="model-gen-service")
+    generate = Mock(side_effect=_fake_stl)
+    process_message(_job_body(submission_id), receive_count=4, io=stack["io"], generate=generate)
+    assert submission_id in caplog.text
+    assert "11111111-1111-1111-1111-111111111111" in caplog.text
+    assert '"receiveCount": 4' in caplog.text or '"receiveCount":4' in caplog.text
+
+
+def test_configure_tracing_installs_sqs_propagator_when_enabled() -> None:
+    import subprocess
+    import sys
+
+    env = os.environ.copy()
+    env.pop("OTEL_SDK_DISABLED", None)
+    env["OTEL_SERVICE_NAME"] = "model-gen-service"
+    env["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://127.0.0.1:9"
+    script = """
+import os
+os.environ.pop("OTEL_SDK_DISABLED", None)
+from app.consumer import configure_tracing
+from opentelemetry import trace
+from opentelemetry.instrumentation.boto3sqs import Boto3SQSInstrumentor
+from opentelemetry.instrumentation.botocore import BotocoreInstrumentor
+assert configure_tracing() is True
+assert configure_tracing() is True
+attrs = dict(trace.get_tracer_provider().resource.attributes)
+assert attrs.get("service.name") == "model-gen-service"
+assert Boto3SQSInstrumentor().is_instrumented_by_opentelemetry
+assert BotocoreInstrumentor().is_instrumented_by_opentelemetry
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=os.path.dirname(os.path.dirname(__file__)),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_boto3sqs_instrumentor_is_the_sqs_propagator() -> None:
+    from opentelemetry.instrumentation.boto3sqs import Boto3SQSInstrumentor
+
+    assert callable(Boto3SQSInstrumentor)
 
 
 def test_parse_job_rejects_sns_envelope() -> None:

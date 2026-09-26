@@ -1,5 +1,7 @@
 package com.cybersixseven.platformapi.config;
 
+import com.cybersixseven.platformapi.ratelimit.ApiRateLimitFilter;
+import com.cybersixseven.platformapi.ratelimit.RateLimitGates;
 import com.cybersixseven.platformapi.service.OauthLoginSuccessHandler;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -22,6 +24,7 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
@@ -47,6 +50,7 @@ public class SecurityConfig {
     private final boolean productEnabled;
     private final OauthLoginSuccessHandler oauthLoginSuccessHandler;
     private final JwtAuthenticationConverter jwtAuthenticationConverter;
+    private final ApiRateLimitFilter apiRateLimitFilter;
 
     public SecurityConfig(
             @Value("${app.cors.allowed-origins}") String[] allowedOrigins,
@@ -54,13 +58,15 @@ public class SecurityConfig {
             @Value("${app.auth.cookie-secure}") boolean cookieSecure,
             @Value("${app.product-enabled}") boolean productEnabled,
             OauthLoginSuccessHandler oauthLoginSuccessHandler,
-            JwtAuthenticationConverter jwtAuthenticationConverter) {
+            JwtAuthenticationConverter jwtAuthenticationConverter,
+            RateLimitGates rateLimitGates) {
         this.allowedOrigins = allowedOrigins;
         this.internalApiKey = internalApiKey;
         this.cookieSecure = cookieSecure;
         this.productEnabled = productEnabled;
         this.oauthLoginSuccessHandler = oauthLoginSuccessHandler;
         this.jwtAuthenticationConverter = jwtAuthenticationConverter;
+        this.apiRateLimitFilter = new ApiRateLimitFilter(rateLimitGates);
     }
 
     @Bean
@@ -116,6 +122,7 @@ public class SecurityConfig {
                 .formLogin(AbstractHttpConfigurer::disable)
                 .addFilterAfter(new CsrfCookieRequestHandlerFilter(), CsrfFilter.class)
                 .addFilterAfter(new ProductAvailabilityFilter(productEnabled), CsrfFilter.class)
+                .addFilterAfter(apiRateLimitFilter, BearerTokenAuthenticationFilter.class)
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED))
                         .accessDeniedHandler((request, response, ex) -> {
@@ -157,7 +164,11 @@ public class SecurityConfig {
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
                 .authorizeHttpRequests(auth -> auth.requestMatchers(
-                                HttpMethod.GET, "/actuator/health", "/actuator/health/**")
+                                HttpMethod.GET,
+                                "/actuator/health",
+                                "/actuator/health/**",
+                                "/actuator/metrics",
+                                "/actuator/metrics/**")
                         .permitAll()
                         .anyRequest()
                         .denyAll());

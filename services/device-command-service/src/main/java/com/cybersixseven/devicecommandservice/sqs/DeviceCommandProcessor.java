@@ -5,7 +5,11 @@ import com.cybersixseven.devicecommandservice.command.DeviceEventStates;
 import com.cybersixseven.devicecommandservice.dynamodb.DeviceEventItem;
 import com.cybersixseven.devicecommandservice.dynamodb.DeviceEventStore;
 import com.cybersixseven.devicecommandservice.mqtt.MqttCommandPublisher;
+import com.cybersixseven.devicecommandservice.observability.Correlation;
+import com.cybersixseven.devicecommandservice.observability.PipelineMeters;
 import com.cybersixseven.devicecommandservice.reward.RewardClient;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -30,6 +34,7 @@ public class DeviceCommandProcessor {
   private final ObjectProvider<MqttCommandPublisher> mqttPublisher;
   private final ObjectMapper objectMapper;
   private final RewardClient rewardClient;
+  private final PipelineMeters meters;
   private final String queueUrl;
 
   public DeviceCommandProcessor(
@@ -38,12 +43,14 @@ public class DeviceCommandProcessor {
       ObjectProvider<MqttCommandPublisher> mqttPublisher,
       ObjectMapper objectMapper,
       RewardClient rewardClient,
+      PipelineMeters meters,
       @Value("${app.aws.device-commands-queue-url}") String queueUrl) {
     this.sqsClient = sqsClient;
     this.deviceEventStore = deviceEventStore;
     this.mqttPublisher = mqttPublisher;
     this.objectMapper = objectMapper;
     this.rewardClient = rewardClient;
+    this.meters = meters;
     this.queueUrl = queueUrl;
   }
 
@@ -60,43 +67,46 @@ public class DeviceCommandProcessor {
         .waitTimeSeconds(5)
         .maxNumberOfMessages(10)
         .visibilityTimeout(60)
+        .messageAttributeNames("All")
         .build());
     for (Message message : response.messages()) {
       try {
         extendVisibility(message);
         handle(message);
       } catch (RuntimeException ex) {
+        meters.queueFailure();
         log.error("device command failed messageId={}", message.messageId(), ex);
       }
     }
   }
 
   public void handle(Message message) {
+    Instant snsPublishedAt = snsPublishedAt(message);
     DeviceCommandMessage command = applyReward(objectMapper.readValue(message.body(), DeviceCommandMessage.class));
-    DeviceEventItem existing = deviceEventStore.find(command.commandId().toString()).orElse(null);
-    if (existing != null && DeviceEventStates.isComplete(existing.getState())) {
-      log.info(
-          "sqs redelivery already complete commandId={} submissionId={} state={}",
-          command.commandId(),
-          command.submissionId(),
-          existing.getState());
-      delete(message);
-      return;
-    }
+    Correlation.put(command.submissionId(), command.commandId(), command.deviceId());
+    try {
+      DeviceEventItem existing = deviceEventStore.find(command.commandId().toString()).orElse(null);
+      if (existing != null && DeviceEventStates.isComplete(existing.getState())) {
+        meters.queueRedelivery();
+        log.info("sqs redelivery already complete state={}", existing.getState());
+        delete(message);
+        return;
+      }
 
-    deviceEventStore.createPendingIfAbsent(command);
-    mqttPublisher.getObject().publishCommand(command);
-    boolean sent = deviceEventStore.markSent(command.commandId().toString());
-    if (!sent) {
-      throw new IllegalStateException("refusing to delete SQS; SENT transition failed commandId="
-          + command.commandId());
+      deviceEventStore.createPendingIfAbsent(command);
+      mqttPublisher.getObject().publishCommand(command);
+      meters.snsToMqtt(snsPublishedAt);
+      boolean sent = deviceEventStore.markSent(command.commandId().toString());
+      if (!sent) {
+        throw new IllegalStateException("refusing to delete SQS; SENT transition failed commandId="
+            + command.commandId());
+      }
+      delete(message);
+      meters.queueSuccess();
+      log.info("sqs processed");
+    } finally {
+      Correlation.clear();
     }
-    delete(message);
-    log.info(
-        "sqs processed commandId={} submissionId={} deviceId={}",
-        command.commandId(),
-        command.submissionId(),
-        command.deviceId());
   }
 
   private DeviceCommandMessage applyReward(DeviceCommandMessage command) {
@@ -105,8 +115,26 @@ public class DeviceCommandProcessor {
     }
     int intensity = rewardClient
         .selectIntensity(command.score(), command.totalQuestions())
-        .orElse(DeviceCommandMessage.DEFAULT_INTENSITY);
+        .orElseGet(() -> {
+          meters.rewardFallback();
+          return DeviceCommandMessage.DEFAULT_INTENSITY;
+        });
     return command.withIntensity(DeviceCommandMessage.clampIntensity(intensity));
+  }
+
+  private static Instant snsPublishedAt(Message message) {
+    if (!message.hasMessageAttributes()) {
+      return null;
+    }
+    var attribute = message.messageAttributes().get("snsPublishedAt");
+    if (attribute == null || attribute.stringValue() == null || attribute.stringValue().isBlank()) {
+      return null;
+    }
+    try {
+      return Instant.parse(attribute.stringValue());
+    } catch (DateTimeParseException ex) {
+      return null;
+    }
   }
 
   private void extendVisibility(Message message) {

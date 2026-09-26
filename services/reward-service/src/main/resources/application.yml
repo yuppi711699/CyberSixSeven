@@ -5,5 +5,19 @@ spring:
   application:
     name: reward-service
 
+logging:
+  structured:
+    format:
+      console: ecs
+    ecs:
+      service:
+        name: reward-service
+    json:
+      context:
+        include: true
+        prefix: ""
+      customizer:
+        - com.cybersixseven.reward.RedactingLogCustomizer
+
 app:
   internal-api-key: ${INTERNAL_API_KEY:}

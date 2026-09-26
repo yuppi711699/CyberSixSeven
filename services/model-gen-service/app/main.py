@@ -4,8 +4,13 @@ HTTP surface is GET /health only. The SQS consumer is ``python -m app.consumer``
 """
 
 from fastapi import FastAPI
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-app = FastAPI(title="model-gen-service", version="0.4.0")
+from app.consumer import configure_tracing
+
+app = FastAPI(title="model-gen-service", version="0.7.0")
+if configure_tracing():
+    FastAPIInstrumentor.instrument_app(app)
 
 
 @app.get("/health")

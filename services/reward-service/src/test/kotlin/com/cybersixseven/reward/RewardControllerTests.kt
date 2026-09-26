@@ -1,17 +1,23 @@
 package com.cybersixseven.reward
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Test
+import org.slf4j.LoggerFactory
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.http.MediaType
 import org.springframework.web.client.RestClient
 import org.springframework.web.client.RestClientResponseException
+import org.junit.jupiter.api.extension.ExtendWith
 
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = ["app.internal-api-key=test-internal-api-key"],
 )
+@ExtendWith(OutputCaptureExtension::class)
 class RewardControllerTests(@LocalServerPort port: Int) {
     private val client = RestClient.builder().baseUrl("http://127.0.0.1:$port").build()
 
@@ -44,6 +50,13 @@ class RewardControllerTests(@LocalServerPort port: Int) {
     fun scoreAboveTotalIsRejected() {
         val status = post("test-internal-api-key", """{"score":4,"totalQuestions":2}""")
         assertEquals(400, status)
+    }
+
+    @Test
+    fun structuredLogsRedactSecrets(output: CapturedOutput) {
+        LoggerFactory.getLogger(RewardControllerTests::class.java).info("password=hunter2")
+        assertFalse(output.all.contains("hunter2"))
+        assertFalse(output.all.contains("password=hunter2"))
     }
 
     private fun post(key: String?, json: String): Int {

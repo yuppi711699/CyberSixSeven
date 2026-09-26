@@ -1,6 +1,7 @@
 # Local development stack for CyberSixSeven.
 # v0.5: Postgres, Redis, LocalStack (SNS/SQS/DynamoDB/S3), Mosquitto mTLS.
-# Jaeger arrives in v0.7. Pin LocalStack to 4.7 — 2026.03+ unified images
+# v0.7: Jaeger all-in-one 1.76.0 (UI 16686, OTLP gRPC 4317).
+# Pin LocalStack to 4.7 — 2026.03+ unified images
 # require an auth token this repo does not store.
 services:
   postgres:
@@ -61,6 +62,15 @@ services:
     volumes:
       - ./infra/local/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - ./infra/local/mosquitto/certs:/mosquitto/certs:ro
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.76.0
+    container_name: cybersixseven-jaeger
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
 
 # Named volume: without it postgres:17's declared VOLUME lands in an anonymous
 # volume that is silently discarded on recreate. Harmless at v0.1; from v0.2

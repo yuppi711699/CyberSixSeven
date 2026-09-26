@@ -1,7 +1,9 @@
 package com.cybersixseven.platformapi;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.net.URI;
@@ -9,12 +11,17 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.ApplicationContext;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@ExtendWith(OutputCaptureExtension.class)
 class PlatformApiApplicationTests extends PostgresIntegrationTest {
 
     @LocalServerPort
@@ -46,5 +53,12 @@ class PlatformApiApplicationTests extends PostgresIntegrationTest {
 
         assertEquals(200, response.statusCode());
         assertEquals("{\"status\":\"UP\"}", response.body());
+    }
+
+    @Test
+    void structuredLogsRedactSecrets(CapturedOutput output) {
+        LoggerFactory.getLogger(PlatformApiApplicationTests.class).info("password=hunter2");
+        assertFalse(output.getAll().contains("hunter2"));
+        assertTrue(output.getAll().contains("password=[redacted]"));
     }
 }

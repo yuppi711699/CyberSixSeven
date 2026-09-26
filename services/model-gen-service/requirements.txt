@@ -14,6 +14,17 @@ uvicorn==0.42.0
 # and is used for the internal PATCH callback with explicit connect/read timeouts.
 boto3==1.43.93
 
+# OpenTelemetry. SDK 1.44.0 is paired with instrumentation 0.65b0.
+# botocore alone does not propagate SQS context; boto3sqs does.
+opentelemetry-api==1.44.0
+opentelemetry-sdk==1.44.0
+opentelemetry-exporter-otlp-proto-grpc==1.44.0
+# PyPI name is opentelemetry-distro. opentelemetry-instrumentation-distro does not exist.
+opentelemetry-distro==0.65b0
+opentelemetry-instrumentation-fastapi==0.65b0
+opentelemetry-instrumentation-botocore==0.65b0
+opentelemetry-instrumentation-boto3sqs==0.65b0
+
 # Tests: real CAD + moto 5 mock_aws (not the moto 4 mock_s3/mock_sqs decorators).
 moto==5.2.3
 pytest==9.0.2

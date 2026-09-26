@@ -14,6 +14,8 @@ import com.cybersixseven.platformapi.entity.ScoredAnswerSnapshot;
 import com.cybersixseven.platformapi.entity.Submission;
 import com.cybersixseven.platformapi.event.OutboxCommittedEvent;
 import com.cybersixseven.platformapi.event.SubmissionScoredEvent;
+import com.cybersixseven.platformapi.observability.Correlation;
+import com.cybersixseven.platformapi.observability.PlatformMeters;
 import com.cybersixseven.platformapi.repository.OutboxEventRepository;
 import com.cybersixseven.platformapi.repository.QuestionRepository;
 import com.cybersixseven.platformapi.repository.SubmissionRepository;
@@ -25,6 +27,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
@@ -36,12 +40,15 @@ public class SubmissionService {
     static final String EVENT_CORRECT = "correct";
     static final String EVENT_INCORRECT = "incorrect";
 
+    private static final Logger log = LoggerFactory.getLogger(SubmissionService.class);
+
     private final QuestionRepository questionRepository;
     private final SubmissionRepository submissionRepository;
     private final OutboxEventRepository outboxEventRepository;
     private final DeviceAssignmentService deviceAssignmentService;
     private final SubmissionCapabilityGenerator capabilityGenerator;
     private final ApplicationEventPublisher eventPublisher;
+    private final PlatformMeters meters;
     private final int defaultIntensity;
 
     public SubmissionService(
@@ -51,6 +58,7 @@ public class SubmissionService {
             DeviceAssignmentService deviceAssignmentService,
             SubmissionCapabilityGenerator capabilityGenerator,
             ApplicationEventPublisher eventPublisher,
+            PlatformMeters meters,
             @Value("${app.command.default-intensity}") int defaultIntensity) {
         this.questionRepository = questionRepository;
         this.submissionRepository = submissionRepository;
@@ -58,6 +66,7 @@ public class SubmissionService {
         this.deviceAssignmentService = deviceAssignmentService;
         this.capabilityGenerator = capabilityGenerator;
         this.eventPublisher = eventPublisher;
+        this.meters = meters;
         this.defaultIntensity = defaultIntensity;
     }
 
@@ -100,6 +109,13 @@ public class SubmissionService {
                 correctCount,
                 snapshots.size());
         outboxEventRepository.save(new OutboxEvent(commandId, payload, now));
+        meters.submissionCreated();
+        Correlation.put(submission.getId(), commandId, device.getHardwareId());
+        try {
+            log.info("submission stored");
+        } finally {
+            Correlation.clear();
+        }
         eventPublisher.publishEvent(new OutboxCommittedEvent(commandId));
         eventPublisher.publishEvent(new SubmissionScoredEvent(submission.getId(), studentId, score));
 

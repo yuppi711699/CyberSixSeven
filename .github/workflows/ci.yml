@@ -1,0 +1,52 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  jvm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: verify
+        run: ./mvnw -B verify
+        working-directory: services
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: pnpm
+        run: corepack enable && corepack prepare pnpm@11.26.0 --activate
+      - name: install
+        run: pnpm install --frozen-lockfile
+      - name: test build lint
+        run: pnpm -w test && pnpm -w build && pnpm -w lint
+      - name: playwright
+        run: pnpm exec playwright install --with-deps chromium && pnpm exec playwright test --project=chromium
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: services/model-gen-service/requirements.txt
+      - name: pytest
+        working-directory: services/model-gen-service
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements.txt
+          .venv/bin/pytest -q

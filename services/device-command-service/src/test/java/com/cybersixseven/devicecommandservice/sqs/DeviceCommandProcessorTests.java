@@ -13,7 +13,9 @@ import com.cybersixseven.devicecommandservice.command.DeviceEventStates;
 import com.cybersixseven.devicecommandservice.dynamodb.DeviceEventItem;
 import com.cybersixseven.devicecommandservice.dynamodb.DeviceEventStore;
 import com.cybersixseven.devicecommandservice.mqtt.MqttCommandPublisher;
+import com.cybersixseven.devicecommandservice.observability.PipelineMeters;
 import com.cybersixseven.devicecommandservice.reward.RewardClient;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.UUID;
@@ -50,6 +52,8 @@ class DeviceCommandProcessorTests {
   private RewardClient rewardClient;
 
   private DeviceCommandProcessor processor;
+  private PipelineMeters meters;
+  private SimpleMeterRegistry registry;
   private UUID commandId;
   private UUID submissionId;
   private String body;
@@ -59,8 +63,10 @@ class DeviceCommandProcessorTests {
     lenient().when(mqttPublisher.getObject()).thenReturn(mqttCommandPublisher);
     lenient().when(rewardClient.selectIntensity(org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt()))
         .thenReturn(OptionalInt.empty());
+    registry = new SimpleMeterRegistry();
+    meters = new PipelineMeters(registry);
     processor = new DeviceCommandProcessor(
-        sqsClient, deviceEventStore, mqttPublisher, new JsonMapper(), rewardClient, "http://queue");
+        sqsClient, deviceEventStore, mqttPublisher, new JsonMapper(), rewardClient, meters, "http://queue");
     commandId = UUID.fromString("11111111-1111-1111-1111-111111111111");
     submissionId = UUID.fromString("22222222-2222-2222-2222-222222222222");
     body =
@@ -168,6 +174,7 @@ class DeviceCommandProcessorTests {
     assertEquals(5, captor.getValue().waitTimeSeconds());
     assertEquals(60, captor.getValue().visibilityTimeout());
     assertEquals(10, captor.getValue().maxNumberOfMessages());
+    assertEquals(java.util.List.of("All"), captor.getValue().messageAttributeNames());
   }
 
   @Test
@@ -187,7 +194,7 @@ class DeviceCommandProcessorTests {
   @Test
   void pollReturnsImmediatelyWhenQueueUrlIsBlank() {
     DeviceCommandProcessor idle = new DeviceCommandProcessor(
-        sqsClient, deviceEventStore, mqttPublisher, new JsonMapper(), rewardClient, "");
+        sqsClient, deviceEventStore, mqttPublisher, new JsonMapper(), rewardClient, meters, "");
     idle.poll();
     verify(sqsClient, never())
         .receiveMessage(any(ReceiveMessageRequest.class));
@@ -229,6 +236,28 @@ class DeviceCommandProcessorTests {
     verify(mqttCommandPublisher).publishCommand(captor.capture());
     assertEquals(DeviceCommandMessage.DEFAULT_INTENSITY, captor.getValue().intensity());
     verify(sqsClient).deleteMessage(any(DeleteMessageRequest.class));
+    assertEquals(1.0, registry.get("reward.fallback").counter().count());
+  }
+
+  @Test
+  void snsPublishedAtAttributeFeedsTheMqttSli() {
+    when(deviceEventStore.find(commandId.toString())).thenReturn(Optional.empty());
+    when(deviceEventStore.markSent(commandId.toString())).thenReturn(true);
+    Message stamped = Message.builder()
+        .messageId("m1")
+        .receiptHandle("rh")
+        .body(body)
+        .messageAttributes(java.util.Map.of(
+            "snsPublishedAt",
+            software.amazon.awssdk.services.sqs.model.MessageAttributeValue.builder()
+                .dataType("String")
+                .stringValue(java.time.Instant.now().minusSeconds(1).toString())
+                .build()))
+        .build();
+
+    processor.handle(stamped);
+
+    assertEquals(1, registry.get("sli.sns_to_mqtt").timer().count());
   }
 
   private Message message() {

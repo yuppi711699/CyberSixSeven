@@ -19,10 +19,12 @@ import com.cybersixseven.platformapi.entity.Question;
 import com.cybersixseven.platformapi.entity.Submission;
 import com.cybersixseven.platformapi.event.OutboxCommittedEvent;
 import com.cybersixseven.platformapi.event.SubmissionScoredEvent;
+import com.cybersixseven.platformapi.observability.PlatformMeters;
 import com.cybersixseven.platformapi.repository.OutboxEventRepository;
 import com.cybersixseven.platformapi.repository.QuestionRepository;
 import com.cybersixseven.platformapi.repository.SubmissionRepository;
 import com.cybersixseven.platformapi.service.SubmissionCapabilityGenerator.GeneratedCapability;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -76,6 +78,7 @@ class SubmissionServiceTests {
                 deviceAssignmentService,
                 capabilityGenerator,
                 eventPublisher,
+                new PlatformMeters(new SimpleMeterRegistry()),
                 3);
     }
 
