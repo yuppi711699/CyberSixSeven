@@ -30,5 +30,8 @@ bool st7789Ready();
 void st7789FillScreen(uint16_t color);
 void st7789FillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color);
 void st7789FillCircle(int16_t cx, int16_t cy, int16_t r, uint16_t color);
+// One window write. pixels are native RGB565, length w*h. Replaces the rect
+// without a separate clear, so a sprite blit does not flash the background.
+void st7789Blit(int16_t x, int16_t y, int16_t w, int16_t h, const uint16_t* pixels);
 int16_t st7789TextWidth(const char* text, uint8_t scale);
 void st7789DrawText(int16_t x, int16_t y, const char* text, uint16_t color, uint8_t scale);

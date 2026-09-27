@@ -318,6 +318,34 @@ void st7789FillScreen(uint16_t color) {
   st7789FillRect(0, 0, kTftWidth, kTftHeight, color);
 }
 
+void st7789Blit(int16_t x, int16_t y, int16_t w, int16_t h, const uint16_t* pixels) {
+  if (!ready || pixels == nullptr || w <= 0 || h <= 0) {
+    return;
+  }
+  if (x < 0 || y < 0 || x + w > kTftWidth || y + h > kTftHeight) {
+    return;
+  }
+
+  SpiLock lock;
+  setWindow(x, y, w, h);
+  digitalWrite(kTftDcPin, HIGH);
+  const size_t total = static_cast<size_t>(w) * static_cast<size_t>(h);
+  size_t sent = 0;
+  while (sent < total) {
+    size_t chunk = total - sent;
+    if (chunk > static_cast<size_t>(kTftWidth)) {
+      chunk = static_cast<size_t>(kTftWidth);
+    }
+    for (size_t i = 0; i < chunk; ++i) {
+      const uint16_t px = pixels[sent + i];
+      rowBuf[i * 2] = static_cast<uint8_t>(px >> 8);
+      rowBuf[i * 2 + 1] = static_cast<uint8_t>(px);
+    }
+    SPI.writeBytes(rowBuf, chunk * 2);
+    sent += chunk;
+  }
+}
+
 void st7789FillCircle(int16_t cx, int16_t cy, int16_t r, uint16_t color) {
   if (!ready || r < 0) {
     return;

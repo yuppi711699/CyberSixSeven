@@ -65,7 +65,18 @@ constexpr int16_t kPupilR = 12;
 constexpr int16_t kTextScale = 2;
 constexpr int16_t kTextY0 = 168;
 constexpr int16_t kTextY1 = 198;
-constexpr uint32_t kFrameMs = 100;
+constexpr uint32_t kFrameMs = 80;
+// Fixed rects. The eye moves inside the rect; the rect itself never moves,
+// so a sprite blit covers the previous frame and leaves no ghosts.
+constexpr int16_t kBoxW = 88;
+constexpr int16_t kBoxH = 106;
+constexpr int16_t kBoxY = 12;
+constexpr int16_t kLeftX = 26;
+constexpr int16_t kRightX = 126;
+constexpr int16_t kSmileX = 72;
+constexpr int16_t kSmileY = 114;
+constexpr int16_t kSmileW = 96;
+constexpr int16_t kSmileH = 34;
 constexpr uint32_t kBlinkMs = 140;
 constexpr uint32_t kLookHoldMinMs = 900;
 constexpr uint32_t kLookHoldMaxMs = 2200;
@@ -88,6 +99,9 @@ int8_t lookTargetY = 0;
 uint32_t lookStartedAtMs = 0;
 uint32_t nextLookAtMs = 400;
 bool textDirty = true;
+
+alignas(4) uint16_t eyeBox[kBoxW * kBoxH];
+alignas(4) uint16_t smileBox[kSmileW * kSmileH];
 
 bool displayReady() {
   return st7789Ready();
@@ -116,10 +130,69 @@ uint32_t holdMs() {
   return kLookHoldMinMs + (static_cast<uint32_t>(random(0, 1 + (kLookHoldMaxMs - kLookHoldMinMs))));
 }
 
-void eraseArt() {
-  // Eyes, smile, and sparkles live above the text. One band erase, then redraw.
-  // ~15 ms at 40 MHz — faceUpdate gates this to kFrameMs so MQTT still runs.
-  st7789FillRect(0, 4, kTftWidth, 156, kBg);
+int boxIsqrt(int n) {
+  if (n <= 0) {
+    return 0;
+  }
+  int x = n;
+  for (;;) {
+    const int y = (x + n / x) / 2;
+    if (y >= x) {
+      return x;
+    }
+    x = y;
+  }
+}
+
+void boxClear(uint16_t* box, int16_t w, int16_t h) {
+  const size_t n = static_cast<size_t>(w) * static_cast<size_t>(h);
+  for (size_t i = 0; i < n; ++i) {
+    box[i] = kBg;
+  }
+}
+
+void boxHLine(uint16_t* box, int16_t bw, int16_t bh, int16_t x, int16_t y, int16_t w, uint16_t color) {
+  if (y < 0 || y >= bh || w <= 0) {
+    return;
+  }
+  if (x < 0) {
+    w = static_cast<int16_t>(w + x);
+    x = 0;
+  }
+  if (x >= bw || w <= 0) {
+    return;
+  }
+  if (x + w > bw) {
+    w = static_cast<int16_t>(bw - x);
+  }
+  uint16_t* row = box + static_cast<size_t>(y) * static_cast<size_t>(bw) + static_cast<size_t>(x);
+  for (int16_t i = 0; i < w; ++i) {
+    row[i] = color;
+  }
+}
+
+void boxFillRect(uint16_t* box, int16_t bw, int16_t bh, int16_t x, int16_t y, int16_t w, int16_t h,
+                 uint16_t color) {
+  for (int16_t row = 0; row < h; ++row) {
+    boxHLine(box, bw, bh, x, static_cast<int16_t>(y + row), w, color);
+  }
+}
+
+void boxFillCircle(uint16_t* box, int16_t bw, int16_t bh, int16_t cx, int16_t cy, int16_t r,
+                   uint16_t color) {
+  if (r < 0) {
+    return;
+  }
+  const int r2 = static_cast<int>(r) * static_cast<int>(r);
+  for (int16_t dy = static_cast<int16_t>(-r); dy <= r; ++dy) {
+    const int16_t dx = static_cast<int16_t>(boxIsqrt(r2 - static_cast<int>(dy) * dy));
+    boxHLine(box, bw, bh, static_cast<int16_t>(cx - dx), static_cast<int16_t>(cy + dy),
+             static_cast<int16_t>(2 * dx + 1), color);
+  }
+}
+
+void flushEye(int16_t boxX) {
+  st7789Blit(boxX, kBoxY, kBoxW, kBoxH, eyeBox);
 }
 
 void drawCentered(int16_t y, const char* text, uint16_t color) {
@@ -159,53 +232,72 @@ void paintText() {
 }
 
 void sparkle(int16_t x, int16_t y, uint32_t now) {
-  if (((now / 80) & 1u) == 0) {
-    return;
-  }
-  st7789FillRect(static_cast<int16_t>(x - 4), y, 9, 2, kSparkle);
-  st7789FillRect(static_cast<int16_t>(x - 1), static_cast<int16_t>(y - 3), 3, 8, kSparkle);
+  const bool on = ((now / 80) & 1u) != 0;
+  const uint16_t color = on ? kSparkle : kBg;
+  st7789FillRect(static_cast<int16_t>(x - 4), y, 9, 2, color);
+  st7789FillRect(static_cast<int16_t>(x - 1), static_cast<int16_t>(y - 3), 3, 8, color);
 }
 
 void drawSmile(int16_t cy) {
+  boxClear(smileBox, kSmileW, kSmileH);
   constexpr int16_t mid = 120;
   for (int16_t x = -40; x <= 40; x = static_cast<int16_t>(x + 2)) {
-    const int16_t y = static_cast<int16_t>(cy + (x * x) / 110);
-    st7789FillRect(static_cast<int16_t>(mid + x), y, 3, 3, kSclera);
+    const int16_t sy = static_cast<int16_t>(cy + (x * x) / 110);
+    boxFillRect(smileBox, kSmileW, kSmileH, static_cast<int16_t>(mid + x - kSmileX),
+                static_cast<int16_t>(sy - kSmileY), 3, 3, kSclera);
   }
+  st7789Blit(kSmileX, kSmileY, kSmileW, kSmileH, smileBox);
 }
 
-void drawOpenEye(int16_t cx, int16_t cy, int8_t pupilX, int8_t pupilY, int16_t lidClose) {
-  st7789FillCircle(cx, cy, kEyeR, kSclera);
+void drawOpenEye(int16_t boxX, int16_t screenCx, int16_t screenCy, int8_t pupilX, int8_t pupilY,
+                 int16_t lidClose) {
+  boxClear(eyeBox, kBoxW, kBoxH);
+  const int16_t cx = static_cast<int16_t>(screenCx - boxX);
+  const int16_t cy = static_cast<int16_t>(screenCy - kBoxY);
+  boxFillCircle(eyeBox, kBoxW, kBoxH, cx, cy, kEyeR, kSclera);
   const int16_t px = clamp16(static_cast<int16_t>(cx + pupilX), static_cast<int16_t>(cx - 10),
                              static_cast<int16_t>(cx + 10));
   const int16_t py = clamp16(static_cast<int16_t>(cy + pupilY), static_cast<int16_t>(cy - 6),
                              static_cast<int16_t>(cy + 6));
-  st7789FillCircle(px, py, kPupilR, kPupil);
-  st7789FillCircle(static_cast<int16_t>(px - 5), static_cast<int16_t>(py - 5), 3, kSclera);
+  boxFillCircle(eyeBox, kBoxW, kBoxH, px, py, kPupilR, kPupil);
+  boxFillCircle(eyeBox, kBoxW, kBoxH, static_cast<int16_t>(px - 5), static_cast<int16_t>(py - 5), 3,
+                kSclera);
   if (lidClose > 0) {
     const int16_t h = clamp16(lidClose, 0, static_cast<int16_t>(kEyeR * 2));
-    st7789FillRect(static_cast<int16_t>(cx - kEyeR), static_cast<int16_t>(cy - kEyeR),
-                   static_cast<int16_t>(kEyeR * 2 + 1), h, kBg);
+    boxFillRect(eyeBox, kBoxW, kBoxH, static_cast<int16_t>(cx - kEyeR),
+                static_cast<int16_t>(cy - kEyeR), static_cast<int16_t>(kEyeR * 2 + 1), h, kBg);
   }
+  flushEye(boxX);
 }
 
-void drawHappyEye(int16_t cx, int16_t cy) {
-  st7789FillCircle(cx, cy, static_cast<int16_t>(kEyeR - 4), kSclera);
-  st7789FillCircle(cx, static_cast<int16_t>(cy - 16), static_cast<int16_t>(kEyeR - 4), kBg);
+void drawHappyEye(int16_t boxX, int16_t screenCx, int16_t screenCy) {
+  boxClear(eyeBox, kBoxW, kBoxH);
+  const int16_t cx = static_cast<int16_t>(screenCx - boxX);
+  const int16_t cy = static_cast<int16_t>(screenCy - kBoxY);
+  const int16_t r = static_cast<int16_t>(kEyeR - 4);
+  boxFillCircle(eyeBox, kBoxW, kBoxH, cx, cy, r, kSclera);
+  boxFillCircle(eyeBox, kBoxW, kBoxH, cx, static_cast<int16_t>(cy - 16), r, kBg);
+  flushEye(boxX);
 }
 
-void drawEncourageEye(int16_t cx, int16_t cy, int8_t pupilX, int8_t pupilY, int16_t lidClose) {
-  st7789FillCircle(cx, cy, static_cast<int16_t>(kEyeR - 4), kSclera);
+void drawEncourageEye(int16_t boxX, int16_t screenCx, int16_t screenCy, int8_t pupilX, int8_t pupilY,
+                      int16_t lidClose) {
+  boxClear(eyeBox, kBoxW, kBoxH);
+  const int16_t cx = static_cast<int16_t>(screenCx - boxX);
+  const int16_t cy = static_cast<int16_t>(screenCy - kBoxY);
+  boxFillCircle(eyeBox, kBoxW, kBoxH, cx, cy, static_cast<int16_t>(kEyeR - 4), kSclera);
   const int16_t px = clamp16(static_cast<int16_t>(cx + pupilX), static_cast<int16_t>(cx - 8),
                              static_cast<int16_t>(cx + 8));
   const int16_t py = clamp16(static_cast<int16_t>(cy + pupilY - 4), static_cast<int16_t>(cy - 8),
                              static_cast<int16_t>(cy + 4));
-  st7789FillCircle(px, py, static_cast<int16_t>(kPupilR - 2), kPupil);
-  st7789FillCircle(static_cast<int16_t>(px - 4), static_cast<int16_t>(py - 4), 2, kSclera);
+  boxFillCircle(eyeBox, kBoxW, kBoxH, px, py, static_cast<int16_t>(kPupilR - 2), kPupil);
+  boxFillCircle(eyeBox, kBoxW, kBoxH, static_cast<int16_t>(px - 4), static_cast<int16_t>(py - 4), 2,
+                kSclera);
   if (lidClose > 0) {
-    st7789FillRect(static_cast<int16_t>(cx - kEyeR), static_cast<int16_t>(cy - kEyeR),
-                   static_cast<int16_t>(kEyeR * 2 + 1), lidClose, kBg);
+    boxFillRect(eyeBox, kBoxW, kBoxH, static_cast<int16_t>(cx - kEyeR),
+                static_cast<int16_t>(cy - kEyeR), static_cast<int16_t>(kEyeR * 2 + 1), lidClose, kBg);
   }
+  flushEye(boxX);
 }
 
 void pickLook(uint32_t now) {
@@ -256,8 +348,8 @@ void drawIdle(uint32_t now, bool mqttReady) {
   if (!mqttReady && lid < 20) {
     lid = 20;
   }
-  drawOpenEye(kLeftCx, kEyeCy, static_cast<int8_t>(lx), static_cast<int8_t>(ly), lid);
-  drawOpenEye(kRightCx, kEyeCy, static_cast<int8_t>(lx), static_cast<int8_t>(ly), lid);
+  drawOpenEye(kLeftX, kLeftCx, kEyeCy, static_cast<int8_t>(lx), static_cast<int8_t>(ly), lid);
+  drawOpenEye(kRightX, kRightCx, kEyeCy, static_cast<int8_t>(lx), static_cast<int8_t>(ly), lid);
 }
 
 void drawHappy(uint32_t now) {
@@ -265,8 +357,8 @@ void drawHappy(uint32_t now) {
   const int16_t hop = static_cast<int16_t>(t % 360);
   const int16_t bounce = static_cast<int16_t>(hop < 180 ? (180 - hop) / 12 : (hop - 180) / 12);
   const int16_t cy = static_cast<int16_t>(kEyeCy - bounce);
-  drawHappyEye(kLeftCx, cy);
-  drawHappyEye(kRightCx, cy);
+  drawHappyEye(kLeftX, kLeftCx, cy);
+  drawHappyEye(kRightX, kRightCx, cy);
   drawSmile(static_cast<int16_t>(124 - bounce / 2));
   sparkle(36, 14, now);
   sparkle(204, 16, now);
@@ -280,8 +372,8 @@ void drawEncourage(uint32_t now) {
     startBlink(now);
   }
   const int16_t lid = blinkLid(now);
-  drawEncourageEye(static_cast<int16_t>(kLeftCx + sway), kEyeCy, 0, -2, lid);
-  drawEncourageEye(static_cast<int16_t>(kRightCx + sway), kEyeCy, 0, -2, lid);
+  drawEncourageEye(kLeftX, static_cast<int16_t>(kLeftCx + sway), kEyeCy, 0, -2, lid);
+  drawEncourageEye(kRightX, static_cast<int16_t>(kRightCx + sway), kEyeCy, 0, -2, lid);
 }
 
 #else
@@ -603,10 +695,13 @@ void faceUpdate(uint32_t now, bool mqttReady) {
   }
 #elif C67_LCD_TYPE == C67_LCD_ST7789
   if (textDirty) {
+    // Once per mode change. The eye sprites repaint the same frame, so this
+    // does not flash. Skipping it leaves the previous smile and sparkles up.
+    st7789FillRect(0, 0, kTftWidth, 20, kBg);
+    st7789FillRect(kSmileX, kSmileY, kSmileW, kSmileH, kBg);
     paintText();
     textDirty = false;
   }
-  eraseArt();
   switch (mode) {
     case FaceMode::Happy:
       drawHappy(now);
